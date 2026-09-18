@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>闸门P · 图层校验台</title>
+<style>
+  :root{
+    --bg:#F7F6F3; --card:#FFFFFF; --line:#E3E1DA; --line2:#D3D1C7;
+    --ink:#2C2C2A; --ink2:#5F5E5A; --ink3:#888780;
+    --pass-bg:#EAF3DE; --pass-ln:#B6D48A; --pass-tx:#3B6D11;
+    --cond-bg:#FAEEDA; --cond-ln:#E9C48A; --cond-tx:#633806;
+    --deny-bg:#FCEBEB; --deny-ln:#EFB4B4; --deny-tx:#A32D2D;
+    --na-bg:#EFEFEC; --na-ln:#D6D5CF; --na-tx:#6B6A65;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1100px; margin:0 auto; padding:40px 28px 72px}
+  h1{font-size:22px; font-weight:600; margin:0 0 6px}
+  h2{font-size:16px; font-weight:600; margin:0 0 4px}
+  h3{font-size:13px; font-weight:600; margin:0 0 8px}
+  .sub{color:var(--ink2); margin:0 0 4px}
+  .quote{margin:18px 0 0; padding:14px 18px; background:var(--card);
+    border-left:3px solid var(--ink); border-radius:0 8px 8px 0}
+  .quote b{font-weight:600}
+  section{margin-top:38px}
+  .sect-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+  .sect-head .num{display:inline-flex; align-items:center; justify-content:center;
+    width:22px; height:22px; border-radius:50%; background:var(--ink); color:#fff;
+    font-size:12px; font-weight:600; flex:none}
+  .sect-head p{margin:0; color:var(--ink3); font-size:13px}
+
+  /* 保真分层选择 */
+  .fid{display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px}
+  .fid button{
+    font:inherit; cursor:pointer; padding:8px 16px; border-radius:9px;
+    border:1px solid var(--line2); background:var(--card); color:var(--ink2); transition:.15s;
+  }
+  .fid button:hover{border-color:var(--ink3)}
+  .fid button.on{background:var(--ink); border-color:var(--ink); color:#fff; font-weight:600}
+
+  /* 判项卡 */
+  .items{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .item{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; transition:.15s}
+  .item.no{border-color:var(--deny-ln); background:#FFFCFC}
+  .item.na{border-color:var(--na-ln); background:#FCFCFB}
+  .item-top{display:flex; align-items:baseline; gap:8px; margin-bottom:6px}
+  .item-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
+    background:var(--na-bg); color:var(--ink2); padding:2px 7px; border-radius:6px; flex:none}
+  .item-name{font-weight:600}
+  .item-method{color:var(--ink3); font-size:12px; margin:0 0 4px}
+  .item-thr{color:var(--ink2); font-size:12px; margin:0 0 10px}
+  .item-thr code{font-family:ui-monospace,Menlo,monospace; background:var(--na-bg);
+    padding:1px 5px; border-radius:4px; font-size:11px}
+  .verdicts{display:flex; gap:6px}
+  .verdicts button{
+    font:inherit; font-size:12px; cursor:pointer; flex:1; padding:6px 0; border-radius:7px;
+    border:1px solid var(--line2); background:var(--card); color:var(--ink2); transition:.12s;
+  }
+  .verdicts button:hover{border-color:var(--ink3)}
+  .verdicts button[data-v="yes"].on{background:var(--pass-bg); border-color:var(--pass-ln); color:var(--pass-tx); font-weight:600}
+  .verdicts button[data-v="no"].on{background:var(--deny-bg); border-color:var(--deny-ln); color:var(--deny-tx); font-weight:600}
+  .verdicts button[data-v="na"].on{background:var(--na-bg); border-color:var(--na-ln); color:var(--na-tx); font-weight:600}
+  .item-fix{margin:10px 0 0; padding:9px 11px; border-radius:8px; background:var(--deny-bg);
+    color:var(--deny-tx); font-size:12px; display:none}
+  .item.no .item-fix{display:block}
+  .item-fix b{font-weight:600}
+
+  /* 判定面板 */
+  .board{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:20px 22px;
+    position:sticky; bottom:20px; box-shadow:0 6px 20px rgba(44,44,42,.07)}
+  .board-row{display:flex; align-items:center; gap:14px; flex-wrap:wrap}
+  .verdict-badge{padding:9px 18px; border-radius:10px; font-weight:600; font-size:15px; flex:none}
+  .vb-wait{background:var(--na-bg); color:var(--na-tx)}
+  .vb-pass{background:var(--pass-bg); color:var(--pass-tx)}
+  .vb-deny{background:var(--deny-bg); color:var(--deny-tx)}
+  .vb-cond{background:var(--cond-bg); color:var(--cond-tx)}
+  .board p{margin:0; color:var(--ink2); font-size:13px}
+  .board .act{margin-top:12px; padding-top:12px; border-top:1px solid var(--line); display:none}
+  .board .act.show{display:block}
+  .board .act ul{margin:6px 0 0; padding-left:20px}
+  .board .act li{margin:5px 0; color:var(--ink2)}
+  .board .act li b{color:var(--ink)}
+  .counter{margin-left:auto; color:var(--ink3); font-size:12px; text-align:right}
+  .counter b{color:var(--ink); font-size:14px}
+  .counter button{font:inherit; font-size:12px; margin-top:6px; cursor:pointer;
+    padding:5px 12px; border-radius:7px; border:1px solid var(--line2); background:var(--card); color:var(--ink2)}
+  .counter button:hover{border-color:var(--ink3)}
+
+  table{width:100%; border-collapse:collapse; background:var(--card);
+    border:1px solid var(--line); border-radius:12px; overflow:hidden}
+  th,td{text-align:left; padding:10px 14px; border-bottom:1px solid var(--line); font-size:13px; vertical-align:top}
+  th{background:#F2F1ED; font-weight:600; color:var(--ink); white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  td b{font-weight:600}
+  .tag{display:inline-block; font-size:11px; padding:2px 8px; border-radius:6px; white-space:nowrap}
+  .t-red{background:var(--deny-bg); color:var(--deny-tx)}
+  .t-amber{background:var(--cond-bg); color:var(--cond-tx)}
+  .t-green{background:var(--pass-bg); color:var(--pass-tx)}
+  .t-gray{background:var(--na-bg); color:var(--na-tx)}
+  .foot{margin-top:34px; color:var(--ink3); font-size:12px}
+  @media (max-width:820px){ .items{grid-template-columns:1fr} .wrap{padding:28px 18px 56px} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>闸门P · 图层校验台</h1>
+  <p class="sub">端到端编排 S5 —— 坏图不许进 GPU</p>
+  <p class="sub" style="font-size:13px">依据：REPORT21 §4 · 上游工具：闸门② 动作白名单 → 本台 → 闸门③ 派发硬校验</p>
+
+  <div class="quote">
+    <b>为什么必须新增这道闸门：</b>图片单张成本 ≈ <b>¥0.0444 + 1 分钟</b>；视频单段成本 ≈ <b>10 分钟 GPU</b>。
+    图不过关就进 H3，错误会被模型<b>忠实放大</b>（GIGO）—— 用 1 分钟挡住 10 分钟，这是全链路性价比最高的防御点。
+  </div>
+
+  <!-- ① 先定保真档 -->
+  <section>
+    <div class="sect-head">
+      <span class="num">1</span>
+      <h2>先定保真档（决定 P-01 的严格程度）</h2>
+      <p>来自 S0 ★闸门① 的判定结果，可在此覆盖</p>
+    </div>
+    <div class="fid" id="fid">
+      <button data-f="形态级" class="on">形态级（无 logo / 无中文标签 / 无价格）</button>
+      <button data-f="像素级">像素级（有 logo / 中文标签 / 价格 / 复杂印刷）</button>
+    </div>
+    <div class="quote" style="margin-top:0">
+      <b id="fidTip">形态级</b>：TT Image2 可重绘产品（以产品图作参考），整图可直接进 H3。
+    </div>
+  </section>
+
+  <!-- ② 六项判据 -->
+  <section>
+    <div class="sect-head">
+      <span class="num">2</span>
+      <h2>六项判据 · 逐项判定</h2>
+      <p>原子是/否 · 先证据后判定 · 允许 N/A</p>
+    </div>
+    <div class="items" id="items"></div>
+  </section>
+
+  <!-- ③ 判定面板 -->
+  <section>
+    <div class="sect-head">
+      <span class="num">3</span>
+      <h2>判定与处置</h2>
+      <p>任一「否」即拦下 —— 但处置方式按判项不同</p>
+    </div>
+    <div class="board">
+      <div class="board-row">
+        <span class="verdict-badge vb-wait" id="badge">待判定</span>
+        <p id="summary">尚未完成 6 项判定。</p>
+        <div class="counter">
+          重出轮次 <b id="rounds">0</b> / 2<br>
+          <button id="reset">重置</button>
+        </div>
+      </div>
+      <div class="act" id="act">
+        <h3 style="margin:0">处置动作</h3>
+        <ul id="actList"></ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ④ 回退总表 -->
+  <section>
+    <div class="sect-head">
+      <span class="num">4</span>
+      <h2>回退动作总表（照做）</h2>
+    </div>
+    <table>
+      <thead>
+        <tr><th>不过项</th><th>处置</th><th>是否重出</th><th>为什么</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>P-01</b> 产品保真<br><span class="tag t-gray">形态级</span></td>
+          <td>强化「保持不变」约束 + 提高参考图权重</td>
+          <td><span class="tag t-green">✅ 最多 2 轮</span></td>
+          <td>形态级允许重绘，靠约束把形态拉回来</td>
+        </tr>
+        <tr>
+          <td><b>P-01</b> 产品保真<br><span class="tag t-red">像素级</span></td>
+          <td>🚨 <b>立即转混合合成</b>（产品真实像素后期合成）</td>
+          <td><span class="tag t-red">❌ 不重出</span></td>
+          <td>生成模型必然把 logo/中文画歪，重出多少次都救不回</td>
+        </tr>
+        <tr>
+          <td><b>P-02</b> 模特一致</td>
+          <td>把人脸图列为强参考重出；仍不过 → 换回真实模特图</td>
+          <td><span class="tag t-green">✅</span></td>
+          <td>身份漂移属随机型，重出有效</td>
+        </tr>
+        <tr>
+          <td><b>P-03</b> 规格合规</td>
+          <td>修 size / 修提示词重出</td>
+          <td><span class="tag t-green">✅ 必须过</span></td>
+          <td>这是格式错，不是能力问题</td>
+        </tr>
+        <tr>
+          <td><b>P-04</b> 异文字与水印</td>
+          <td>加负向约束重出；仍不过 → 后期遮挡/裁切</td>
+          <td><span class="tag t-amber">⚠️ 1 轮</span></td>
+          <td>生成模型的文字是"画出来的"，只能约束不能保证</td>
+        </tr>
+        <tr>
+          <td><b>P-05</b> 首尾同源</td>
+          <td>🚨 <b>流程修正</b>：必须改为从同一底图派生</td>
+          <td><span class="tag t-red">❌ 改流程</span></td>
+          <td>这不是运气问题，是流程错了</td>
+        </tr>
+        <tr>
+          <td><b>P-06</b> 状态单调</td>
+          <td>🚨 <b>回闸门②</b> 改动作设计</td>
+          <td><span class="tag t-red">❌ 改设计</span></td>
+          <td>结构型失败：换 seed 零效果，视频端判官也救不了</td>
+        </tr>
+        <tr>
+          <td><b>P-07</b> 画布比例一致</td>
+          <td>🔁 <b>重出图片</b>（改 size）</td>
+          <td><span class="tag t-amber">🔁 重出即修</span></td>
+          <td>唯一可 <b>100% 自动</b>判定的项 —— 已写进 <code>orchestrator.py</code> / <code>test_fl2v_official.py</code> 做<b>硬拦截</b></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="foot">
+      <b>熔断</b>：Gate-P 整体重出上限 <b>2 轮</b>；到顶必须报明确失败，<b>禁止静默续跑</b>（一键网站场景下 = 无上限账单）。<br>
+      <b>P-06 是「动作逻辑性」的前哨</b>：它把结构型失败挡在花 GPU 之前 —— 比视频端任何判官都便宜。<br>
+      <b>P-07 是「零成本」的一项</b>：纯读像素算比例，毫秒级、无模型、无需阈值标定 —— 但它是<b>最容易漏、代价最贵</b>的坑（H3 首帧被静默拉伸，全程不报错）。
+    </p>
+  </section>
+
+  <p class="foot">
+    REPORT21《端到端编排总链路》§4 · 配套：<code>orchestrator.py</code>（S5 阶段）· <code>judge_config.yaml</code>（视频端判项，本台为其图层延伸）
+  </p>
+</div>
+
+<script>
+const ITEMS = [
+  { id:"P-01", name:"产品保真",
+    method:"产品 ROI 直方图嵌入相似度（refcheck.py 思路）",
+    thr:"形态级：形状/色/结构相似；像素级：必须是原图像素合成",
+    fix:"形态级 → 强化「保持不变」约束重出（≤2 轮）｜像素级 → 立即转混合合成，不再重出" },
+  { id:"P-02", name:"模特一致",
+    method:"跨图人脸嵌入余弦距离（CPU 实现）",
+    thr:"< tau_face_img（待标定）；同镜组内必须同人",
+    fix:"把人脸图列为强参考重出；仍不过 → 换回真实模特图" },
+  { id:"P-03", name:"规格合规",
+    method:"比例匹配 / 主体安全区 / 无网格·无拼贴 / 分辨率 / 单主体",
+    thr:"硬性，不过即拒",
+    fix:"修 size 与提示词重出 —— 格式错必须过" },
+  { id:"P-04", name:"异文字与水印",
+    method:"OCR 比对（画面文字必须 ⊆ prompt 白名单）",
+    thr:"出现未声明的 logo 字 / 水印 / 乱码 → 拒",
+    fix:"加负向约束重出 1 轮；仍不过 → 后期遮挡/裁切" },
+  { id:"P-05", name:"首尾同源",
+    method:"同镜首尾帧 纯背景区 MAE",
+    thr:"< tau_src（实测参考带 1.11–3.64，按链路类型定档）",
+    fix:"流程修正：必须改为同一底图同源派生（不是重抽）" },
+  { id:"P-06", name:"状态单调",
+    method:"尾帧状态必须是首帧状态的推进（人工/半自动确认）",
+    thr:"回转即拒（例：瓶子被「擅自」放回桌面）",
+    fix:"回闸门② 改动作设计 —— 结构型失败，重出无效" },
+  { id:"P-07", name:"画布比例一致",
+    method:"逐段读首尾帧实际像素，与 H3 画布比比例（可 100% 自动化，不需要判官）",
+    thr:"|比例偏差| ≤ 2%；画布 = aspect+MP 经 32 对齐（9:16@0.98 → 768x1344，16:9 → 1344x768）",
+    fix:"图片层按画布同尺寸重出（TT Image2 的 size 直接传画布像素串）。⚠️ 首帧被 plain stretch 拉伸变形、尾帧被 cover-crop 裁切，且不报错" }
+];
+
+const state = { fidelity:"形态级", verdicts:{}, rounds:0 };
+
+const itemsEl = document.getElementById("items");
+itemsEl.innerHTML = ITEMS.map(it => `
+  <div class="item" id="card-${it.id}">
+    <div class="item-top">
+      <span class="item-id">${it.id}</span>
+      <span class="item-name">${it.name}</span>
+    </div>
+    <p class="item-method">${it.method}</p>
+    <p class="item-thr">判据：${it.thr}</p>
+    <div class="verdicts">
+      <button data-item="${it.id}" data-v="yes">是</button>
+      <button data-item="${it.id}" data-v="no">否</button>
+      <button data-item="${it.id}" data-v="na">N/A</button>
+    </div>
+    <p class="item-fix"><b>处置：</b>${it.fix}</p>
+  </div>`).join("");
+
+// 保真档切换
+document.querySelectorAll("#fid button").forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll("#fid button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    state.fidelity = b.dataset.f;
+    const tip = document.getElementById("fidTip");
+    if (state.fidelity === "像素级") {
+      tip.textContent = "像素级";
+      tip.parentElement.innerHTML = '<b>像素级</b>：TT Image2 只准画环境/模特/空场，产品本体走<b>真实像素合成</b>。P-01 收紧为"必须是原图像素"。';
+    } else {
+      tip.parentElement.innerHTML = '<b>形态级</b>：TT Image2 可重绘产品（以产品图作参考），整图可直接进 H3。';
+    }
+    render();
+  };
+});
+
+// 判定按钮
+itemsEl.querySelectorAll(".verdicts button").forEach(b => {
+  b.onclick = () => {
+    const id = b.dataset.item, v = b.dataset.v;
+    state.verdicts[id] = (state.verdicts[id] === v) ? undefined : v;
+    itemsEl.querySelectorAll(`button[data-item="${id}"]`).forEach(x =>
+      x.classList.toggle("on", x.dataset.v === state.verdicts[id]));
+    const card = document.getElementById("card-" + id);
+    card.className = "item" + (state.verdicts[id] === "no" ? " no"
+                              : state.verdicts[id] === "na" ? " na" : "");
+    render();
+  };
+});
+
+const FIX_ORDER = {
+  "P-06":"red", "P-05":"red", "P-01":"amber", "P-02":"green", "P-03":"green", "P-04":"amber"
+};
+
+function render() {
+  const answered = ITEMS.filter(it => state.verdicts[it.id]).length;
+  const noes = ITEMS.filter(it => state.verdicts[it.id] === "no");
+  const badge = document.getElementById("badge");
+  const summary = document.getElementById("summary");
+  const act = document.getElementById("act");
+  const list = document.getElementById("actList");
+
+  if (answered < ITEMS.length) {
+    badge.className = "verdict-badge vb-wait";
+    badge.textContent = "待判定";
+    summary.textContent = `已完成 ${answered} / ${ITEMS.length} 项。`;
+    act.classList.remove("show");
+    return;
+  }
+
+  if (noes.length === 0) {
+    badge.className = "verdict-badge vb-pass";
+    badge.textContent = "✅ 放行";
+    summary.innerHTML = `6 项全部通过（含 N/A）⇒ <b>允许进入 S6 H3 生成</b>。N/A 项计入覆盖率，单条 N/A > 40% 需人工复核。`;
+    act.classList.remove("show");
+    return;
+  }
+
+  // 有否 —— 判断处置类型
+  const structural = noes.some(it => ["P-05","P-06"].includes(it.id));
+  badge.className = "verdict-badge " + (structural ? "vb-deny" : "vb-cond");
+  badge.textContent = structural ? "🚫 拦下 · 改设计" : "↻ 拦下 · 可重出";
+  summary.innerHTML = `${noes.length} 项判「否」：<b>${noes.map(i => i.id + " " + i.name).join("、")}</b>`;
+  act.classList.add("show");
+  list.innerHTML = noes.map(it => {
+    let extra = "";
+    if (it.id === "P-01") extra = state.fidelity === "像素级"
+      ? ' <b>（像素级）</b>→ 转混合合成，<b>不再重出</b>' : ' <b>（形态级）</b>→ 强化约束重出';
+    if (["P-05","P-06"].includes(it.id)) extra = ' → <b>重出无效</b>，必须改流程/改设计';
+    return `<li><b>${it.id} ${it.name}</b>：${it.fix}${extra}</li>`;
+  }).join("");
+
+  // 重出轮次只在「可重出」情形下计数
+  if (!structural) {
+    state.rounds++;
+    document.getElementById("rounds").textContent = state.rounds;
+    if (state.rounds >= 2) {
+      list.innerHTML += '<li style="color:#A32D2D"><b>⚠️ 已达重出上限 2 轮</b> → 触发熔断：报明确失败，禁止静默续跑</li>';
+    }
+  }
+  document.getElementById("rounds").textContent = state.rounds;
+}
+
+document.getElementById("reset").onclick = () => {
+  state.verdicts = {}; state.rounds = 0;
+  document.getElementById("rounds").textContent = 0;
+  itemsEl.querySelectorAll(".verdicts button").forEach(x => x.classList.remove("on"));
+  itemsEl.querySelectorAll(".item").forEach(x => x.className = "item");
+  render();
+};
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+Keep the camera angle, framing, scale, background, sofa, wall, window light, curtain and colour grade EXACTLY the same as the input image. Keep her face, hair, expression, makeup and clothing exactly the same. Keep the open compact held up beside her cheek in exactly the same position and size in her right hand, with the lid open and the mirror facing the camera.
+
+Change only her LEFT hand and the puff: her left hand is now raised, and she holds the pale-pink puff flat against the side of her face, pressed lightly onto her cheek just below the cheekbone, next to the compact. The puff rests softly on her skin and covers part of that cheek, and her left fingers are visible at the outer edge of the puff. Her right hand still holds the open compact steady and is completely unchanged.
+
+Do not move, rotate or close the compact. Do not change her right hand. Do not add or remove any object. Do not add text, logos or watermarks.

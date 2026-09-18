@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>H3 提速叠加台 · 单卡 3090 逐层增益与互斥约束</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --card2:#fafbfc; --line:#e4e7ec; --line2:#eef1f4;
+    --text:#191c20; --muted:#6b7280; --accent:#2f6fed; --accent-bg:#eef3fe;
+    --ok:#0f7a55; --okbg:#e7f6ef; --warn:#8f5f00; --warnbg:#fdf4e3;
+    --bad:#b82424; --badbg:#fdeceb; --shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.06);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14171a; --card:#1c2024; --card2:#22262b; --line:#2e343a; --line2:#282d33;
+      --text:#e9ecf0; --muted:#98a2b3; --accent:#6b9bff; --accent-bg:#1e2735;
+      --ok:#4ecfa0; --okbg:#142b23; --warn:#e0b062; --warnbg:#2c2517;
+      --bad:#f08a8a; --badbg:#2e1c1c; --shadow:none;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1160px; margin:0 auto; padding:28px 20px 72px}
+  h1{font-size:22px; margin:0 0 6px; letter-spacing:-.2px}
+  h2{font-size:16px; margin:0 0 4px; letter-spacing:-.1px}
+  h3{font-size:14px; margin:0}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 22px}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:16px; box-shadow:var(--shadow)}
+  .card > .hd{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:14px; flex-wrap:wrap}
+  .hint{color:var(--muted); font-size:12.5px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.92em; background:var(--card2); border:1px solid var(--line2); border-radius:4px; padding:1px 5px}
+  .callout{border-left:3px solid var(--bad); background:var(--badbg); border-radius:8px; padding:14px 16px; margin-bottom:16px}
+  .callout.warn{border-left-color:var(--warn); background:var(--warnbg)}
+  .callout.ok{border-left-color:var(--ok); background:var(--okbg)}
+  .callout h3{margin-bottom:6px}
+  .callout p{margin:6px 0 0}
+  .grid{display:grid; gap:14px}
+  .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  @media(max-width:900px){.g2,.g4{grid-template-columns:1fr}}
+  .kv{background:var(--card2); border:1px solid var(--line2); border-radius:10px; padding:12px 14px}
+  .kv .k{font-size:12px; color:var(--muted); margin-bottom:2px}
+  .kv .v{font-size:21px; font-weight:500; font-variant-numeric:tabular-nums; letter-spacing:-.3px}
+  .kv .u{font-size:12px; color:var(--muted); font-weight:400}
+  .pill{display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:500; border-radius:999px; padding:2px 9px; border:1px solid; white-space:nowrap}
+  .pill.ok{color:var(--ok); background:var(--okbg); border-color:var(--ok)}
+  .pill.warn{color:var(--warn); background:var(--warnbg); border-color:var(--warn)}
+  .pill.bad{color:var(--bad); background:var(--badbg); border-color:var(--bad)}
+  .pill.mute{color:var(--muted); background:var(--card2); border-color:var(--line)}
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{text-align:left; padding:8px 9px; border-bottom:1px solid var(--line2); vertical-align:top}
+  th{font-size:12px; color:var(--muted); font-weight:500; white-space:nowrap}
+  td{font-variant-numeric:tabular-nums}
+  .num{text-align:right; white-space:nowrap}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px}
+  button{font:inherit; font-size:12.5px; padding:6px 13px; border-radius:8px; border:1px solid var(--line);
+    background:var(--card); color:var(--text); cursor:pointer; transition:.12s}
+  button:hover{border-color:var(--accent); color:var(--accent)}
+  button.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  button.primary:hover{filter:brightness(1.08); color:#fff}
+  .layer{border:1px solid var(--line2); border-radius:10px; padding:11px 13px; background:var(--card2); display:flex; gap:11px; align-items:flex-start}
+  .layer.on{border-color:var(--accent); background:var(--accent-bg)}
+  .layer.off{opacity:.62}
+  .layer.superseded{border-color:var(--warn); background:var(--warnbg)}
+  .layer input{margin-top:3px; accent-color:var(--accent); width:15px; height:15px; flex:none}
+  .layer .t{flex:1; min-width:0}
+  .layer .nm{font-size:13.5px; font-weight:500; display:flex; gap:7px; align-items:center; flex-wrap:wrap}
+  .layer .meta{font-size:12px; color:var(--muted); margin-top:3px}
+  .layer .nt{font-size:12.5px; color:var(--muted); margin-top:6px; display:none}
+  .layer.open .nt{display:block}
+  .layer .caret{font-size:11px; color:var(--muted); cursor:pointer; user-select:none}
+  .stack{margin-top:6px}
+  .stack .row{display:flex; align-items:center; gap:10px; font-size:12.5px; padding:3px 0}
+  .stack .row .lb{width:36%; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .stack .row .bar{flex:1; height:7px; border-radius:4px; background:var(--line2); overflow:hidden; margin:0}
+  .stack .row .bar > i{display:block; height:100%; background:var(--accent); border-radius:4px}
+  .stack .row .vl{width:66px; text-align:right; font-variant-numeric:tabular-nums}
+  .segbar{display:flex; height:22px; border-radius:6px; overflow:hidden; border:1px solid var(--line2); margin-top:8px}
+  .segbar > span{display:flex; align-items:center; justify-content:center; font-size:11px; color:#fff; overflow:hidden; white-space:nowrap}
+  .foot{color:var(--muted); font-size:12px; margin-top:10px}
+  ul{margin:6px 0 0; padding-left:20px}
+  li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>H3 提速叠加台</h1>
+  <p class="sub">单卡 RTX 3090（SM86 / torch 2.14+cu130 / ComfyUI 0.33.0 / 纯官方节点）· 逐层增益、互斥约束与质量风险<br>
+  参考基线：<b>一条 30s 片 · 片内两镜 · 0.98MP · 8 步 · p=0.5</b> ⇒ 当前 <b>33–40 分钟</b>（含抽卡，计算取中值 36.5 分）</p>
+
+  <div class="callout warn">
+    <h3>先看这条：这是「排序工具」，不是「报价工具」</h3>
+    <p>倍数由各层公开实测数据按 <b>分段 Amdahl 模型</b> 叠加：把单条耗时拆成 去噪 80% / 视频解码 13% / 音频解码 2% / 文本编码 3% / 封装 2%，每层只加速它作用的那部分。
+    <b>作用占比是按结构估的，本机一次都没测过</b>。真实数字必须靠部署指南 Phase 6 的 A0–A8 逐层 A/B 跑出来。</p>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>一、选层</h2><span class="hint">点 ▶ 展开说明 · 同组方案自动取最优、不叠乘</span></div>
+    <div class="btnrow">
+      <button class="primary" data-preset="t0">T0 · 官方纯净档（零安装）</button>
+      <button data-preset="t1">T1 · 低风险增量档</button>
+      <button data-preset="t2">T2 · 激进档（仅草稿）</button>
+      <button data-preset="clear">清空</button>
+    </div>
+    <div class="grid g2" id="layers"></div>
+  </div>
+
+  <div id="alerts"></div>
+
+  <div class="card">
+    <div class="hd"><h2>二、结果</h2><span class="hint">相对当前基线 33–40 分钟</span></div>
+    <div class="grid g4" id="kpis"></div>
+    <div class="stack" id="stack"></div>
+    <div id="segview"></div>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>三、逐层明细</h2><span class="hint">被同组更优项取代的层不参与计算</span></div>
+    <table>
+      <thead><tr>
+        <th>层</th><th>方案</th><th class="num">作用占比</th><th class="num">本层倍数</th>
+        <th class="num">单开净提速</th><th class="num">省下</th><th>证据强度</th><th>装机</th><th>质量风险</th><th>状态</th>
+      </tr></thead>
+      <tbody id="detail"></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="hd"><h2>四、必须记住的五条边界</h2></div>
+    <ul>
+      <li><b>层与层会互相稀释</b>：这是 Amdahl 的必然结果。本次计算里 T1 相对 T0 只多 ≈13% 提速——因为分辨率层已经把去噪段砍掉一半，SageAttention 能抓的绝对值变小了。<b>先装便宜的，边际收益会自己衰减。</b></li>
+      <li><b>分辨率分层的收益在「探索」，不在「成片」</b>：成片仍需 0.98MP，只靠 latent 放大补回 ⇒ 本条只给 1.3×。它真正的 3–5× 收益是让<b>同样的时间能试更多版本</b>，收益体现在 <b>p 的提高</b>上，要分开记账。</li>
+      <li><b>注意力组三选一</b>：kitchen INT8 / SageAttention / SLA 都是注意力补丁，互斥 ⇒ 取最优，不叠乘。SLA 还必须是<b>最后一个 model patch</b>。</li>
+      <li><b>4 步只给草稿</b>：快速运动在 4 步下会糊、拖影，这是被反复记录的主要失效模式；成片永远回到 6–8 步。</li>
+      <li><b>每层增益 &lt;10% 就不留</b>：任何导致「同 seed 帧差 &gt; 噪声基线 1.08」的层，标记为「变了算」并单独决策。</li>
+    </ul>
+  </div>
+</div>
+
+<script>
+var BASE_LOW = 33, BASE_HIGH = 40;
+var BASE_MID = (BASE_LOW + BASE_HIGH) / 2;
+
+/* 单条耗时拆段（占总量比例，结构性估算） */
+var SEG = { den:0.80, decV:0.13, decA:0.02, cond:0.03, enc:0.02 };
+var SEG_LABEL = { den:'去噪', decV:'视频解码', decA:'音频解码', cond:'文本编码', enc:'封装' };
+var SEG_COLOR = { den:'#2f6fed', decV:'#0f7a55', decA:'#8f5f00', cond:'#6b7280', enc:'#98a2b3' };
+
+/* 施加顺序（固定，保证可复现） */
+var APPLY_ORDER = ['resolution','cache','step','attention','decode','exec','sampler'];
+
+var LAYERS = [
+  /* 基线信息项（不参与计算） */
+  { id:'turbo8', name:'8 步 Turbo LoRA', layer:'步数层', group:'', targets:{}, factor:2.5, info:true,
+    ev:'公开实测', evLv:'ok', ready:'已启用', risk:'低', tier:'base',
+    note:'官方 LightX2V 8 步蒸馏（sha256 2339acdf…b111e，已入库）。<b>它已经包含在 33–40 分钟的基线里</b>，所以不作为“新增提速”参与计算——否则会把同一份收益算两次。' },
+
+  /* T0 零安装 */
+  { id:'resolve', name:'成片走 0.4MP 生成 + latent 放大到近 0.98MP', layer:'分辨率层', group:'resolution',
+    targets:{ den:1, decV:1 }, factor:1.30,
+    ev:'公开实测 3–5×（直接降分辨率生成）', evLv:'ok', ready:'零安装', risk:'中', tier:'t0',
+    note:'这里只给 <b>1.3×</b>：成片仍要 0.98MP，靠 latent 放大补回会掉一点锐度，放大通道本身也要花时间，所以拿不到 3–5×。<br>真正的 3–5× 在<b>试镜/探索</b>阶段（草稿档直接以 0.4MP 生成）——它不减少单条成片成本，而是让同样的时间试更多版本 ⇒ 收益落在 <b>p 值</b>上。' },
+  { id:'kitchen', name:'kitchen INT8 注意力后端', layer:'注意力层', group:'attention',
+    targets:{ den:0.5 }, factor:1.50,
+    ev:'未标定', evLv:'mute', ready:'零安装', risk:'低', tier:'t0',
+    note:'<code>ModelAttentionBackend → comfy kitchen attention</code>。官方内核自带，与我们的 INT8 ConvRot 权重天然匹配。官方只说明“量化 INT8 注意力”，<b>无 H3 实测数据</b> ⇒ T0 第一实验项。' },
+  { id:'compile', name:'TorchCompile', layer:'执行层', group:'exec',
+    targets:{ den:0.3, decV:0.2 }, factor:1.15,
+    ev:'未标定', evLv:'mute', ready:'零安装', risk:'低', tier:'t0',
+    note:'<code>TorchCompileModel</code>，减少 kernel 调度开销，顺带防 OOM。' },
+  { id:'coreup', name:'内核升级 0.33.0 → 0.36.0', layer:'解码层', group:'decode',
+    targets:{ decV:1, enc:0.5 }, factor:1.12,
+    ev:'未标定', evLv:'mute', ready:'零安装', risk:'极低', tier:'t0',
+    note:'0.34.0 起新增 <b>TAESD H3 轻量 VAE 解码器（更快预览）</b>、VAE 优化、EasyCache 音频修复、<b>补齐缺失特殊 token（修生成异常）</b>、prompt embeddings、token 级噪声掩码。纯官方、可锁 revision ⇒ <b>性价比最高的一项</b>。' },
+  { id:'sigma', name:'Sigma Shift 调参（audio 3 → 6）', layer:'采样层', group:'sampler',
+    targets:{ den:0.05 }, factor:1.05,
+    ev:'未标定', evLv:'mute', ready:'零安装', risk:'低', tier:'t0',
+    note:'<code>MiniMaxH3SigmaShift</code>。主要影响音画同步，速度收益很小；社区推荐 video 12 / audio 6（我们现默认 video 12 / audio 3）。' },
+
+  /* T1 需安装 */
+  { id:'sage', name:'SageAttention 2.2.0', layer:'注意力层', group:'attention',
+    targets:{ den:0.5 }, factor:1.80, conflict:['sla'],
+    ev:'公开实测 ≈2×（注意力段）', evLv:'ok', ready:'需安装', risk:'中', tier:'t1',
+    note:'⚠️ 必须过「眼睛专项检查」：INT8 QK 路径在少数情况下会让眼睛糊掉或出现旋涡。回退开关 <code>low_precision_attention=False</code>。<b>本机当前未安装</b>（pip 全环境无此包）。' },
+  { id:'sla', name:'SLA Attention（草稿配方 6 步）', layer:'注意力层', group:'attention',
+    targets:{ den:0.5 }, factor:1.60, conflict:['sage'],
+    ev:'未标定', evLv:'mute', ready:'需安装', risk:'中', tier:'t1',
+    note:'来自 <code>ComfyUI-PlagueKind-Nodes @6ca3037</code>。kernel 失败会<b>自动回退 dense</b>（安全）；必须配 turbo LoRA 且是最后一个 model patch。<b>换 er_sde + beta + 6 步会换掉现有复现基线。</b>' },
+  { id:'vae', name:'VAE Speedup（批量 tile 解码）', layer:'解码层', group:'decode',
+    targets:{ decV:1 }, factor:1.90,
+    ev:'公开实测 ≤2×', evLv:'ok', ready:'需安装', risk:'极低', tier:'t1',
+    note:'⭐ <b>最干净的一项加速</b>：5090 上逐位相同；<b>3090 已被单独验证</b>，偏差仅 fp16 舍入 2.4e-4（远小于 1/256 像素步长）。接在 video VAELoader 之后。' },
+  { id:'motion', name:'跨段链式（Motion Context）', layer:'多段层', group:'segment',
+    targets:{}, factor:1.10, info:true,
+    ev:'未标定', evLv:'mute', ready:'需安装', risk:'低', tier:'t1',
+    note:'<code>ComfyUI-H3-Motion-Context-MultiRef @87de57b</code>，走 latent 路径免重编码。<b>它省的是“段与段之间”的重编码开销，不属于单条生成成本</b>，故不参与本计算。与「片内多镜」互补。' },
+
+  /* T2 激进 */
+  { id:'fast4', name:'FastH3 4 步（NVIDIA FastVideo）', layer:'步数层', group:'step',
+    targets:{ den:1 }, factor:1.40,
+    ev:'公开实测 3.4–3.9×（相对 20 步）', evLv:'ok', ready:'激进 · 需装', risk:'高', tier:'t2',
+    note:'相对我们已用的 8 步，净增益约 1.4×。⚠️ 官方配置是 4×B200；ComfyUI 路线中<b>只有 t2va_only 是已验证的 task_family</b>，FL2VA 走 <code>t2va_fl2va</code>（非默认），Ref2VA 明确标 <code>untrained_exp</code>。仍是 Preview-v1。' },
+  { id:'fbc', name:'FirstBlockCache 块缓存', layer:'缓存层', group:'cache',
+    targets:{ den:1 }, factor:2.00,
+    ev:'公开实测 2.58×（该阶段）', evLv:'ok', ready:'激进 · 需装', risk:'高', tier:'t2',
+    note:'⚠️ <b>跳过 50 层里的 49 层</b>，只重算缓存残差 ⇒ 输出等价性无从保证，必须自测 A/B。' },
+  { id:'tespeed', name:'TE-Speed 块级缓存', layer:'缓存层', group:'cache',
+    targets:{ den:1 }, factor:1.60,
+    ev:'公开实测 40–45%', evLv:'ok', ready:'激进 · 需装', risk:'高', tier:'t2',
+    note:'⚠️ 需要 <code>patch_model.py</code> 改 <code>comfy/ldm/minimax/model.py</code> ⇒ <b>破坏官方代码纯净性</b>，直接冲击「同 seed 逐位复现」铁律。只能在独立副本上打补丁。' },
+  { id:'spectrum', name:'Spectrum 去噪加速', layer:'缓存层', group:'cache',
+    targets:{ den:0.7 }, factor:1.30,
+    ev:'未标定', evLv:'mute', ready:'激进 · 需装', risk:'中', tier:'t2',
+    note:'来自 ALLinONE 包。官方注「画质掉了就关」；degree=1。Block Cache 必须插在 Spectrum <b>之前</b>。' },
+
+  /* 已证伪 */
+  { id:'easycache', name:'EasyCache', layer:'缓存层', group:'cache',
+    targets:{ den:1 }, factor:1.007, debunked:true,
+    ev:'公开实测 −0.7%', evLv:'bad', ready:'不采用', risk:'高', tier:'x',
+    note:'❌ <b>8 步下是空转</b>：EasyCache 是“跳过与上一步相似的步”，只有 8 步根本没有可跳的机会（默认阈值 reuse_threshold=0.2 从未触发）。且有画质退化报告（线条闪烁 / 背景色块）。它在 20 步下确实有效（15s 480p 21min→11min），但我们产线固定 8 步。' }
+];
+
+var state = {};
+LAYERS.forEach(function(L){ state[L.id] = !!L.tier && L.tier !== 'x' && L.tier !== 'base' && L.tier === 't0' && false; });
+/* 默认 = 只勾 T0 */
+['resolve','kitchen','compile','coreup','sigma'].forEach(function(k){ state[k] = true; });
+
+function layerById(id){ for (var i=0;i<LAYERS.length;i++) if (LAYERS[i].id===id) return LAYERS[i]; return null; }
+function active(){ return LAYERS.filter(function(L){ return state[L.id]; }); }
+function computable(){ return active().filter(function(L){ return !L.info && Object.keys(L.targets).length>0; }); }
+function benefit(L){
+  var b = 0;
+  Object.keys(L.targets).forEach(function(s){ b += SEG[s] * L.targets[s] * (1 - 1/L.factor); });
+  return b;
+}
+
+function compute(){
+  /* 1) 组内取最优（同组方案互斥，不叠乘） */
+  var picked = {}, skipped = {};
+  computable().forEach(function(L){
+    if (!L.group){ picked[L.id] = true; return; }
+    var cur = picked['__g_' + L.group];
+    if (cur === undefined){ picked['__g_' + L.group] = L.id; picked[L.id] = true; }
+    else {
+      var prev = layerById(cur);
+      if (benefit(L) > benefit(prev)){ picked[prev.id] = false; skipped[prev.id] = L.id; picked['__g_'+L.group] = L.id; picked[L.id] = true; }
+      else { skipped[L.id] = prev.id; }
+    }
+  });
+
+  /* 2) 分段施加 */
+  var seg = {}; Object.keys(SEG).forEach(function(s){ seg[s] = SEG[s] * BASE_MID; });
+  var trace = [{ label:'当前基线（含 8 步 Turbo 与抽卡）', t:BASE_MID }];
+  var contributions = {};
+
+  APPLY_ORDER.forEach(function(g){
+    var id = picked['__g_' + g];
+    if (!id || !picked[id]) {
+      /* 无组别层也按顺序处理 */
+      if (g === 'exec' || g === 'sampler') { /* handled below */ }
+      return;
+    }
+    var L = layerById(id);
+    var before = 0; Object.keys(seg).forEach(function(s){ before += seg[s]; });
+    Object.keys(L.targets).forEach(function(s){
+      var aff = seg[s] * L.targets[s];
+      seg[s] -= aff * (1 - 1/L.factor);
+    });
+    var after = 0; Object.keys(seg).forEach(function(s){ after += seg[s]; });
+    contributions[L.id] = before - after;
+    trace.push({ label:L.name, t:after });
+  });
+  /* 无 group 的计算层 */
+  computable().forEach(function(L){
+    if (L.group) return;
+    if (!picked[L.id]) return;
+    var before = 0; Object.keys(seg).forEach(function(s){ before += seg[s]; });
+    Object.keys(L.targets).forEach(function(s){
+      var aff = seg[s] * L.targets[s];
+      seg[s] -= aff * (1 - 1/L.factor);
+    });
+    var after = 0; Object.keys(seg).forEach(function(s){ after += seg[s]; });
+    contributions[L.id] = before - after;
+    trace.push({ label:L.name, t:after });
+  });
+
+  var total = 0; Object.keys(seg).forEach(function(s){ total += seg[s]; });
+  var speedup = total > 0 ? BASE_MID / total : 1;
+
+  /* 3) 未被选中的层也给出"单开"参考 */
+  var rows = active().map(function(L){
+    var nt = 0; Object.keys(L.targets).forEach(function(s){
+      nt += SEG[s] * L.targets[s] * (1 - 1/L.factor);
+    });
+    /* 单开净提速：基线各段被该层加速后的总倍数 */
+    var s2 = {}; Object.keys(SEG).forEach(function(s){ s2[s] = SEG[s] * BASE_MID; });
+    Object.keys(L.targets).forEach(function(s){
+      var aff = s2[s] * L.targets[s];
+      s2[s] -= aff * (1 - 1/L.factor);
+    });
+    var t2 = 0; Object.keys(s2).forEach(function(s){ t2 += s2[s]; });
+    return { L:L, share: nt, solo: t2>0 ? BASE_MID/t2 : 1, saved: contributions[L.id] || 0,
+             applied: !!picked[L.id], superBy: skipped[L.id] || null };
+  });
+
+  return { speedup:speedup, total:total, rows:rows, seg:seg, trace:trace,
+           picked:picked, skipped:skipped };
+}
+
+function fmt(n,d){ return Number(n).toFixed(d===undefined?2:d); }
+function riskPill(r){ var m={'极低':'ok','低':'ok','中':'warn','高':'bad'}; return '<span class="pill '+m[r]+'">风险 '+r+'</span>'; }
+function evPill(t,lv){ var m={ok:'ok',warn:'warn',bad:'bad',mute:'mute'}; return '<span class="pill '+(m[lv]||'mute')+'">'+t+'</span>'; }
+function readyPill(r){
+  var c = r.indexOf('零安装')===0 ? 'ok' : (r.indexOf('需安装')===0||r.indexOf('激进')===0 ? 'warn' : (r.indexOf('已启用')===0?'ok':'bad'));
+  return '<span class="pill '+c+'">'+r+'</span>';
+}
+
+function render(){
+  var res = compute();
+
+  /* 层卡片 */
+  document.getElementById('layers').innerHTML = LAYERS.map(function(L){
+    var on = state[L.id];
+    var cls = 'layer ' + (on ? 'on' : 'off');
+    if (on && res.skipped[L.id]) cls += ' superseded';
+    var nt = 0; Object.keys(L.targets).forEach(function(s){ nt += SEG[s]*L.targets[s]*(1-1/L.factor); });
+    var meta = L.info ? '信息项 · 不参与计算'
+      : ('作用占比 ' + fmt(nt*100,1) + '% 总耗时 · 本层倍数 ' + fmt(L.factor,2) + '×');
+    return '<div class="'+cls+'" data-id="'+L.id+'">' +
+      '<input type="checkbox" data-chk="'+L.id+'"'+(on?' checked':'')+'>' +
+      '<div class="t">' +
+        '<div class="nm"><span class="caret" data-care="'+L.id+'">▶</span>' +
+          '<span>'+L.name+'</span><span class="pill mute">'+L.layer+'</span>' +
+          evPill(L.ev,L.evLv) + readyPill(L.ready) + riskPill(L.risk) +
+        '</div>' +
+        '<div class="meta">'+meta+'</div>' +
+        '<div class="nt">'+L.note+'</div>' +
+      '</div></div>';
+  }).join('');
+
+  var host = document.getElementById('layers');
+  host.querySelectorAll('input[data-chk]').forEach(function(el){
+    el.addEventListener('change', function(){ state[el.getAttribute('data-chk')] = el.checked; render(); });
+  });
+  host.querySelectorAll('[data-care]').forEach(function(el){
+    el.addEventListener('click', function(e){
+      e.stopPropagation();
+      var box = el.closest('.layer');
+      box.classList.toggle('open');
+      el.textContent = box.classList.contains('open') ? '▼' : '▶';
+    });
+  });
+
+  var S = res.speedup;
+  var low = BASE_LOW / S, high = BASE_HIGH / S;
+
+  document.getElementById('kpis').innerHTML =
+    kpi('总提速（推算）', fmt(S,2), '× 相对当前基线') +
+    kpi('优化后单条耗时', fmt(low,1)+'–'+fmt(high,1), '分钟（原 '+BASE_LOW+'–'+BASE_HIGH+'）') +
+    kpi('实际生效层数', res.rows.filter(function(r){return r.applied;}).length + ' / ' + LAYERS.length, '层') +
+    kpi('省下时间', fmt(BASE_MID - res.total,1), '分钟 / 条');
+
+  /* 瀑布 */
+  document.getElementById('stack').innerHTML =
+    '<div class="hint" style="margin-top:14px">耗时瀑布（分钟 · 按固定顺序施加）</div>' +
+    res.trace.map(function(r,i){
+      var w = Math.max(2, r.t/BASE_MID*100);
+      return '<div class="row"><span class="lb" title="'+r.label+'">'+(i===0?'':'\u2193 ')+r.label+'</span>' +
+        '<span class="bar"><i style="width:'+w+'%"></i></span><span class="vl">'+fmt(r.t,1)+'</span></div>';
+    }).join('');
+
+  /* 分段视图 */
+  var sumSeg = 0; Object.keys(res.seg).forEach(function(s){ sumSeg += res.seg[s]; });
+  document.getElementById('segview').innerHTML =
+    '<div class="hint" style="margin-top:16px">优化后耗时构成（共 '+fmt(sumSeg,1)+' 分钟）</div>' +
+    '<div class="segbar">' + Object.keys(res.seg).map(function(s){
+      var pct = res.seg[s]/sumSeg*100;
+      return '<span style="width:'+fmt(pct,2)+'%;background:'+SEG_COLOR[s]+'" title="'+SEG_LABEL[s]+'">'+(pct>8?SEG_LABEL[s]+' '+fmt(pct,0)+'%':(pct>3?fmt(pct,0)+'%':''))+'</span>';
+    }).join('') + '</div>';
+
+  /* 明细 */
+  document.getElementById('detail').innerHTML = res.rows.map(function(r){
+    var st = r.applied ? '<span class="pill ok">生效</span>'
+      : (r.superBy ? '<span class="pill warn">被同组更优项取代</span>' : '<span class="pill mute">未选</span>');
+    return '<tr>' +
+      '<td>'+r.L.layer+'</td><td>'+r.L.name+'</td>' +
+      '<td class="num">'+fmt(r.share*100,1)+'%</td>' +
+      '<td class="num">'+fmt(r.L.factor,2)+'×</td>' +
+      '<td class="num"><b>'+fmt(r.solo,2)+'×</b></td>' +
+      '<td class="num">'+(r.applied ? fmt(r.saved,1)+' 分' : '—')+'</td>' +
+      '<td>'+evPill(r.L.ev,r.L.evLv)+'</td>' +
+      '<td>'+r.L.ready+'</td><td>'+riskPill(r.L.risk)+'</td><td>'+st+'</td></tr>';
+  }).join('');
+
+  /* 告警 */
+  var al = [], ids = active().map(function(L){ return L.id; });
+  var pickedIds = Object.keys(res.picked).filter(function(k){ return k.indexOf('__g_')<0 && res.picked[k]; });
+  if (ids.indexOf('sage')>=0 && ids.indexOf('sla')>=0)
+    al.push(['warn','⛔ SageAttention 与 SLA 互斥（已自动取最优）','两者都是注意力补丁且作用同一位置，官方明确不可叠加；SLA 还必须是最后一个 patch。本次已按“单开净提速更高者”自动二选一。']);
+  var deb = active().filter(function(L){ return L.debunked; });
+  if (deb.length)
+    al.push(['warn','⚠️ 你选了已被证伪的层','<b>EasyCache</b> 在 8 步 Turbo 下实测 −0.7%，等于空转，且有画质退化报告。建议取消勾选。']);
+  var risky = active().filter(function(L){ return L.risk==='高' && !L.info; });
+  if (risky.length)
+    al.push(['bad','⚠️ 含高风险层：仅限草稿 / 试镜档，成片禁用','涉及：'+risky.map(function(L){return L.name;}).join('、')+'。理由：4 步在快速运动上会糊、拖影；块缓存跳层后输出等价性无从保证。成片重抽的成本远高于多跑几步。']);
+  if (ids.indexOf('tespeed')>=0)
+    al.push(['bad','⚠️ TE-Speed 会改官方核心代码','需改 <code>comfy/ldm/minimax/model.py</code>，直接冲击「同 seed 逐位复现」铁律。只在独立副本上打补丁，且必须能一键 --revert。']);
+  if (ids.indexOf('coreup')>=0)
+    al.push(['warn','⚠️ 升内核后必须重跑复现验证','0.33.0 → 0.36.0 会改变部分数值路径。升完先做同 seed 复现测试，帧差若 > 噪声基线 1.08，说明资产库要重建。']);
+  if (ids.indexOf('resolve')>=0)
+    al.push(['ok','ℹ️ 分辨率层的真正收益不在这一栏','成片仍需 0.98MP，所以本条只算 1.3×。它 3–5× 的收益属于<b>试镜/探索</b>预算，效果体现在 <b>p 的提高</b>上 —— 要单独记账，别重复计入单条成本。']);
+  if (!al.length) al.push(['ok','当前选层无互斥冲突与高风险项','可以按这个组合进 Phase 6 的逐层 A/B。']);
+  document.getElementById('alerts').innerHTML = al.map(function(a){
+    return '<div class="callout '+(a[0]==='ok'?'ok':(a[0]==='warn'?'warn':''))+'"><h3>'+a[1]+'</h3><p>'+a[2]+'</p></div>';
+  }).join('');
+}
+
+function kpi(k,v,u){ return '<div class="kv"><div class="k">'+k+'</div><div class="v">'+v+'</div><div class="u">'+u+'</div></div>'; }
+
+document.querySelectorAll('[data-preset]').forEach(function(b){
+  b.addEventListener('click', function(){
+    var p = b.getAttribute('data-preset');
+    LAYERS.forEach(function(L){ state[L.id] = false; });
+    if (p==='t0'){ ['resolve','kitchen','compile','coreup','sigma'].forEach(function(k){ state[k]=true; }); }
+    if (p==='t1'){ ['resolve','compile','coreup','vae','sage'].forEach(function(k){ state[k]=true; }); }
+    if (p==='t2'){ ['resolve','compile','coreup','vae','sage','fast4','fbc'].forEach(function(k){ state[k]=true; }); }
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+{
+  "shot": "P1_纯提示词_无动作",
+  "video": "raw/P1_walk.mp4",
+  "prompt_file": "prompt/C1_run.txt",
+  "judge_model": "doubao-seed-2-1-pro-260628",
+  "ts": "2026-09-18 04:14:48",
+  "items": [
+    {
+      "id": "L0-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.0,
+        "threshold": "n%17==5"
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "resolution",
+        "value": 768.0,
+        "threshold": 768.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.01,
+        "threshold": 73.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": -14.0,
+        "threshold": -50.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": 0.0,
+        "threshold": 1.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 48,
+        "region": "luma",
+        "value": 0.0,
+        "threshold": 0.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-08",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-03",
+      "verdict": "no",
+      "evidence": {
+        "frame": 71,
+        "region": "whole-frame",
+        "value": 1.284,
+        "threshold": 0.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "motion-break",
+        "value": 0.0,
+        "threshold": 3.0
+      },
+      "confidence": "high",
+      "kind": "random",
+      "spikes": 0,
+      "declared_cuts_frames": [],
+      "spikes_at_declared_cuts": 0
+    },
+    {
+      "id": "L1-10",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "frame-alternation",
+        "value": 1.865,
+        "threshold": 0.55
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-02",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-05",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    }
+  ],
+  "aggregate": {
+    "verdict": "REJECT",
+    "l0_no": [],
+    "l1_no": [
+      "L1-03"
+    ],
+    "rw_no": [],
+    "p_no": [],
+    "na_ratio": 0.0,
+    "warnings": [],
+    "reasons": [
+      "L1 本地检测器不通过: L1-03"
+    ],
+    "remedies": [
+      "L1-03［structural］动作未发生 / 空转 → **禁止重抽**，加大锚定帧相位差或加中间锚点"
+    ]
+  }
+}

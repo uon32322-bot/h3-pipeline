@@ -1,0 +1,5 @@
+Keep the camera angle, framing, scale, background, sofa, wall, window light, curtain and colour grade EXACTLY the same as the input image. Keep her face, hair, expression, makeup and clothing exactly the same.
+
+Change only the position of her right hand and the compact she is holding: raise her right hand a little, so the closed pink cushion compact is now held at chin height instead of chest height. The arm is bent with the elbow still low and close to her body. The compact is still fully closed, still upright, still with the embossed pale-pink rose lid facing the camera, and still the same size in frame.
+
+Do not open the lid. Do not change her left hand. Do not add or remove any object. Do not add text, logos or watermarks.

@@ -1,0 +1,50 @@
+[
+ {
+  "idx": 1,
+  "t0": 0.0,
+  "t1": 2.5,
+  "png": "post/overlay/shot1.png",
+  "en": "CUSHION RUNNER",
+  "zh": "轻弹缓震跑鞋"
+ },
+ {
+  "idx": 2,
+  "t0": 2.5,
+  "t1": 5.1667,
+  "png": "post/overlay/shot2.png",
+  "en": "HIGH-REBOUND FOAM",
+  "zh": "EVA 高弹发泡中底 · 落地缓震"
+ },
+ {
+  "idx": 3,
+  "t0": 5.1667,
+  "t1": 7.6667,
+  "png": "post/overlay/shot3.png",
+  "en": "BREATHABLE",
+  "zh": "贾卡网面 · 透气不闷脚"
+ },
+ {
+  "idx": 4,
+  "t0": 7.6667,
+  "t1": 10.3333,
+  "png": "post/overlay/shot4.png",
+  "en": "JACQUARD MESH",
+  "zh": "久穿清爽 · 夏天也敢穿"
+ },
+ {
+  "idx": 5,
+  "t0": 10.3333,
+  "t1": 12.8333,
+  "png": "post/overlay/shot5.png",
+  "en": "ON FOOT",
+  "zh": "真人上脚 · 单只约 250g"
+ },
+ {
+  "idx": 6,
+  "t0": 12.8333,
+  "t1": 15.4999,
+  "png": "post/overlay/shot6.png",
+  "en": "LINK BELOW",
+  "zh": "36–45 码 · 点击下方链接"
+ }
+]

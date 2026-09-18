@@ -1,0 +1,367 @@
+{
+  "shot": "D_产品动态卖点",
+  "video": "raw/D_product_dynamic.mp4",
+  "prompt_file": "prompt/D_product_dynamic.txt",
+  "judge_model": "doubao-seed-2-1-pro-260628",
+  "ts": "2026-09-18 04:08:12",
+  "items": [
+    {
+      "id": "L0-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 243.0,
+        "threshold": "n%17==5"
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "resolution",
+        "value": 768.0,
+        "threshold": 768.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 243.0,
+        "threshold": 243.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": -14.0,
+        "threshold": -50.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": 0.0,
+        "threshold": 1.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 62,
+        "region": "luma",
+        "value": 0.0,
+        "threshold": 0.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-08",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 3,
+        "region": "whole-frame",
+        "value": 1.125,
+        "threshold": 0.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-04",
+      "verdict": "no",
+      "evidence": {
+        "frame": 187,
+        "region": "motion-break",
+        "value": 6.663,
+        "threshold": 2.0
+      },
+      "confidence": "high",
+      "kind": "structural",
+      "spikes": 4,
+      "declared_cuts_frames": [
+        60,
+        132,
+        170,
+        209
+      ],
+      "spikes_at_declared_cuts": 7
+    },
+    {
+      "id": "L1-10",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "background-static",
+        "value": 489.145,
+        "threshold": 840.586
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "product",
+        "value": 4.45,
+        "threshold": 8.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "tone",
+        "value": 1.17,
+        "threshold": 6.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-01",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "P-02",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "P-03",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "P-04",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "P-05",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "P-06",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-01",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-02",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-03",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-04",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-05",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "R-06",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "W-01",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "W-03",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "W-05",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "W-06",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    },
+    {
+      "id": "W-07",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "low"
+    }
+  ],
+  "aggregate": {
+    "verdict": "REJECT",
+    "l0_no": [],
+    "l1_no": [
+      "L1-04"
+    ],
+    "rw_no": [],
+    "p_no": [],
+    "na_ratio": 1.0,
+    "warnings": [
+      "R/W 段 na 比例 100% > 40% → 人工复核"
+    ],
+    "reasons": [
+      "L1 本地检测器不通过: L1-04"
+    ],
+    "remedies": [
+      "L1-04［random］帧间跳变 → 孤立单帧属随机型，换 seed 重抽；持续偏高属结构型，拆镜"
+    ]
+  }
+}

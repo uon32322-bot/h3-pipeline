@@ -1,0 +1,890 @@
+{
+  "_meta": {
+    "name": "shotlist_schema",
+    "version": "2.1",
+    "date": "2026-09-18",
+    "purpose": "文字层(ClipForge / 人工文案) → H3 流水线(画面层) 的唯一接口契约。两侧都按此结构读写，禁止直接传像素或整段自由文本。",
+    "rule": "契约变更必须双方同步；H3 侧不得依赖文字层的未声明字段。",
+    "_changelog": {
+      "1.0": "初版：product / shots / 11 列节拍表 / adapter_rules / gate2_merged_rules",
+      "2.0": "★★ 加入【带货结构层】——补上原先缺失的『结构 → 文案 → 脚本』三层。新增：beat_function(带货功能) / selling_point(卖点承载) / hook_type 枚举 / proof_type(证明方式) / retention(留人点) / copy_split 强制三分流 / gate2 闸B 文案合规。节拍表 11 列 → 13 列。依据：带货视频生成SOP.md v1.0",
+      "2.1": "★★ 加入【音频层】与【30–50 s 时长档】：① 音频三模式 L/V/N + 三层路由 + 全片一致性铁律；② 时长档 32/40/50 s（五段比例表 + 口播字数表 + 续命钩必填）；③ 分镜表 13 列 → 15 列（+音频模式 +音轨锚点）；④ 文案三分流 → 四分流（+H3 音效）；⑤ 新增 S1.5 生成分组（段长贴音轨，≤362 帧，L 镜不跨段）；⑥ 闸门② 双闸 → 三闸（+闸C 音频可行性）；⑦ 工序次序改为【音频先行】。依据 REPORT30/3/5。"
+    }
+  },
+  "beat_functions": {
+    "_comment": "⭐ v2.0 核心。每一镜必须且只能承担一个『带货功能』。这是把『卖点陈列片』变成『带货片』的关键字段。行业五段式结构与多源交叉验证，见 REPORT29 §一。",
+    "hook": {
+      "zh": "钩子",
+      "time_budget": "0 – 8%（下限 2.5 s，上限 4.0 s）",
+      "only_job": "让他停下",
+      "audience_question": "这跟我有关系吗？",
+      "subtypes": [
+        "痛点点名",
+        "反差对比",
+        "反常识",
+        "结果前置",
+        "身份锁定"
+      ],
+      "hard_rule": "占全片 8%；下限 2.5 s、上限 4.0 s；识别成本必须低；必须与正文强相关"
+    },
+    "pain": {
+      "zh": "痛点 / 场景代入",
+      "time_budget": "8% – 25%（下限 4.0 s，上限 8.5 s）",
+      "only_job": "让他代入",
+      "audience_question": "这说的不就是我？",
+      "hard_rule": "用第二人称『你』；给具体场景 + 不解决的代价；不得空喊『很麻烦』而不给画面",
+      "ai_constraint": "画面走『场景代入』而非『Before 对比』——AI 生成不了真实的同一主体前后对比"
+    },
+    "proof": {
+      "zh": "价值证明",
+      "time_budget": "25% – 62%（下限 10 s，上限 18.5 s）",
+      "only_job": "让他相信有用",
+      "audience_question": "真能解决？",
+      "hard_rule": "1–2 个卖点；每个卖点必须翻成『使用画面』；禁止念参数；⭐ 后 40%（续命钩位）必须制造第二高潮",
+      "proof_types": [
+        "功能动态演示",
+        "细节特写",
+        "场景化演示",
+        "过程展示",
+        "效果态展示"
+      ]
+    },
+    "trust": {
+      "zh": "信任背书",
+      "time_budget": "62% – 82%（下限 5.0 s，上限 10 s）",
+      "only_job": "让他放下顾虑",
+      "audience_question": "会不会是智商税？",
+      "hard_rule": "必须给『能拍出来的证据』；必须配一个『小缺点』（零缺点 = 不可信）",
+      "ai_constraint": "实测对比 / 用户证言 / 检测报告 —— 我们生成不了 ⇒ 转后期图文层"
+    },
+    "cta": {
+      "zh": "CTA 促单",
+      "time_budget": "82% – 100%（下限 4.0 s，上限 9 s；末尾 3 s 必出现）",
+      "only_job": "让他现在点",
+      "audience_question": "为什么是现在？",
+      "hard_rule": "必须 = 理由 + 指令，不能只喊便宜",
+      "carrier": "后期图文层（价格 / 尺码 / 链接）—— 绝不进 H3 提示词"
+    }
+  },
+  "selling_point_tiers": {
+    "_comment": "S0 卖点分级的机械表达。一条片子只允许 1 个主卖点。",
+    "primary": {
+      "zh": "主卖点",
+      "max_count": 1,
+      "slot": "钩子后第一段（首因效应）"
+    },
+    "secondary": {
+      "zh": "辅助卖点",
+      "max_count": 2,
+      "slot": "价值证明段第二拍 / 信任段"
+    },
+    "spec": {
+      "zh": "规格信息",
+      "slot": "仅后期图文层，绝不进画面"
+    },
+    "dropped": {
+      "zh": "废弃",
+      "rule": "写不进 15 秒的东西就删掉"
+    }
+  },
+  "retention": {
+    "_comment": "留人结构（注意力时间轴管理）。行业经验值，非本项目实测。",
+    "hook_deadline_s": 3.0,
+    "visual_change_every_s": [
+      3,
+      5
+    ],
+    "revive_hook_at_pct": [
+      40,
+      60
+    ],
+    "revive_hook_required_if_dur_gt_s": 20,
+    "cta_landing_count": "全片至少 3 次出现行动指令（后期条 + 口播末句 + 收束画面文案）",
+    "_note_v2_1": "⭐ v2.1：30–50 s 片【必须】补续命钩（旧版 16.2 s 唯一豁免）。位置 40–60% 处，见 duration_tiers.*.revive_hook_s"
+  },
+  "side_a_text_layer_output": {
+    "_comment": "文字层产出（ClipForge 或人工）。字段名为适配层期望名，实际映射在 adapter 中完成。",
+    "product": {
+      "name": "轻弹缓震运动跑鞋",
+      "category": "K1 服装/鞋",
+      "selling_points": [
+        {
+          "text": "高回弹发泡中底，落地缓震不累脚",
+          "tier": "primary",
+          "proof_type": "功能动态演示"
+        },
+        {
+          "text": "贾卡网面透气，久穿不闷脚",
+          "tier": "secondary",
+          "proof_type": "细节特写"
+        },
+        {
+          "text": "轻量化设计，单只仅约250g",
+          "tier": "secondary",
+          "proof_type": "效果态展示"
+        },
+        {
+          "text": "尺码 36-45",
+          "tier": "spec"
+        },
+        {
+          "text": "参考价格 ￥129-169",
+          "tier": "spec"
+        }
+      ],
+      "fidelity_class": "形态级",
+      "_fidelity_rule": "有 logo/中文标签/价格/复杂印刷 = 像素级 → 强制走混合合成；否则 = 形态级 → 交给 H3"
+    },
+    "structure": {
+      "_comment": "S1 结构选型的机械表达。",
+      "skeleton": "PAS",
+      "skeleton_candidates": [
+        "PAS",
+        "scenario_immersion",
+        "FABE_compressed",
+        "contrast_suspense"
+      ],
+      "target_duration_s": 16.208,
+      "target_frames": 389,
+      "hint_words_per_sec": [
+        4,
+        5
+      ],
+      "voiceover_total_words": {
+        "min": 65,
+        "max": 81
+      }
+    },
+    "hook_type": "痛点点名",
+    "hook_line": "跑了三年步，膝盖最先抗议的，是不是你？",
+    "cta": {
+      "text": "129 起，36 到 45 码，链接我放下面了",
+      "reason": "价格锚点",
+      "position": "末镜复读",
+      "urgency": "软紧迫",
+      "onscreen_required": true
+    },
+    "beats": [
+      {
+        "idx": 1,
+        "beat_function": "hook",
+        "selling_point": null,
+        "start": 0.0,
+        "end": 2.5,
+        "voiceover_zh": "跑了三年步，膝盖最先抗议的，是不是你？",
+        "visual": "极近特写：中底受压回弹",
+        "camera": "特写平移"
+      },
+      {
+        "idx": 2,
+        "beat_function": "pain",
+        "selling_point": null,
+        "start": 2.5,
+        "end": 5.5,
+        "voiceover_zh": "每次跑完膝盖发酸，第二天上下楼都得扶着栏杆。",
+        "visual": "真人户外步道行走，自然光",
+        "camera": "静置"
+      },
+      {
+        "idx": 3,
+        "beat_function": "proof",
+        "selling_point": "高回弹发泡中底",
+        "start": 5.5,
+        "end": 8.5,
+        "voiceover_zh": "这双踩下去先是软，然后马上回弹，落地那一下不砸膝盖。",
+        "visual": "厚切中底受压压缩后回弹",
+        "camera": "推近"
+      },
+      {
+        "idx": 4,
+        "beat_function": "proof",
+        "selling_point": "贾卡网面透气",
+        "start": 8.5,
+        "end": 11.0,
+        "voiceover_zh": "鞋面是贾卡网布，光打过去能看出孔洞，夏天穿不闷脚。",
+        "visual": "柔光带横扫过网面，孔洞透亮",
+        "camera": "特写平移"
+      },
+      {
+        "idx": 5,
+        "beat_function": "trust",
+        "selling_point": "高回弹发泡中底",
+        "start": 11.0,
+        "end": 13.5,
+        "voiceover_zh": "中底是 EVA 高弹发泡，分层你肉眼看得见。鞋码正常，脚宽的按平时码来。",
+        "visual": "中底分层结构特写，外底后跟弧线",
+        "camera": "旋转"
+      },
+      {
+        "idx": 6,
+        "beat_function": "cta",
+        "selling_point": null,
+        "start": 13.5,
+        "end": 16.208,
+        "voiceover_zh": "129 起，36 到 45 码，链接我放下面了。",
+        "visual": "产品居中收束，单一全画幅",
+        "camera": "静置"
+      }
+    ],
+    "compliance": {
+      "_comment": "闸门② 闸B。写文案时逐词扫描。",
+      "banned_words": [
+        "最好",
+        "最好用",
+        "第一",
+        "销量第一",
+        "全网最低",
+        "全网第一",
+        "顶级",
+        "国家级",
+        "唯一",
+        "独家",
+        "断货王",
+        "全网爆卖",
+        "根治",
+        "治愈",
+        "彻底解决",
+        "药到病除",
+        "立竿见影",
+        "永不复发"
+      ],
+      "banned_patterns": [
+        "瘦\\s*\\d+\\s*斤",
+        "\\d+\\s*天\\s*(祛|除|消).*"
+      ],
+      "replacement_table": {
+        "最好用 / 第一 / 全网最低": "我自己用下来最顺手的 / 这个价位挺能打",
+        "销量第一 / 断货王": "最近回购的人是真不少",
+        "根治 / 治愈 / 彻底解决": "连用两周，真实变化是……",
+        "瘦 X 斤 / 永不复发": "配合作息，我自己的体感是……"
+      },
+      "legal_basis": "《广告法》第九条禁止『国家级』『最高级』『最佳』等绝对化用语；特殊品类另有专门规定。"
+    }
+  },
+  "side_b_h3_shotlist": {
+    "_comment": "H3 侧 15 列节拍表（v2.1：+音频模式 +音轨锚点）",
+    "header": [
+      "时间段",
+      "镜头",
+      "带货功能",
+      "卖点承载",
+      "视觉主导",
+      "运镜",
+      "款式",
+      "文案",
+      "颜色",
+      "文字效果",
+      "转场",
+      "节奏",
+      "目的",
+      "音频模式",
+      "音轨锚点"
+    ],
+    "rules": {
+      "duration_grid": "时长必须贴 17k+5 帧 @24fps（禁用任意秒数）",
+      "multi_shot_inline": "优先写成一条片内多镜：[Shot 1] ... [Shot 2] At 00:03.500",
+      "no_grid_for_anchors": "锚定照必须是 3 张独立照片，禁止网格/拼贴",
+      "text_split": "文案必须四分流：画面内英文 / 中文口播(=音轨) / 后期图文 / H3 音效(soundscape)",
+      "beat_function_required": "每镜必须有且仅有一个带货功能（hook/pain/proof/trust/cta）",
+      "onscreen_en_placement": "画面内英文字必须同时声明落位（站在哪个面、是否须避开产品）",
+      "audio_mode_required": "每镜必须标注音频模式（L/V/N）。全片路线必须唯一：出现任一 L ⇒ 全片走 H3 锚定；全 V ⇒ 全片后期直贴。禁混合。",
+      "audio_anchor_required": "每镜必须标注音轨锚点（该镜口播句在音轨上的起止时间），供 S1.5 定段长、S6 传 --cuts、A-03/A-04 判项使用。",
+      "single_segment_limit": "单段上限 362 帧 = 15.083 s（本地权重实际可用上限；2K / Regenerate-2K 本地不含）"
+    },
+    "rows": [
+      {
+        "时间段": "00:00.000-00:02.500",
+        "镜头": "[Shot 1]",
+        "带货功能": "hook",
+        "卖点承载": "—",
+        "目的": "钩子·抓停",
+        "视觉主导": "极近特写，厚切缓震层受压微压缩后回弹",
+        "运镜": "特写平移",
+        "款式": "单款",
+        "文案": {
+          "onscreen_en": "SOFT LANDING",
+          "voiceover_zh": "跑了三年步，膝盖最先抗议的，是不是你？",
+          "post_zh": ""
+        },
+        "颜色": "深灰",
+        "文字效果": "单行，落在鞋体上方干净背景带、偏左；不与鞋重叠",
+        "转场": "原生切镜",
+        "节奏": "快（钩子 ≤2.5 s）",
+        "音频模式": "V",
+        "音轨锚点": ""
+      },
+      {
+        "时间段": "00:02.500-00:05.500",
+        "镜头": "[Shot 2] At 00:02.500",
+        "带货功能": "pain",
+        "卖点承载": "—",
+        "目的": "痛点·场景代入",
+        "视觉主导": "真人户外公园步道行走，自然光，脚下有接触阴影",
+        "运镜": "静置",
+        "款式": "单款·真人全身",
+        "文案": {
+          "onscreen_en": "",
+          "voiceover_zh": "每次跑完膝盖发酸，第二天上下楼都得扶着栏杆。",
+          "post_zh": ""
+        },
+        "颜色": "—",
+        "文字效果": "无画面文字",
+        "转场": "原生切镜",
+        "节奏": "中",
+        "音频模式": "V",
+        "音轨锚点": ""
+      },
+      {
+        "时间段": "00:05.500-00:08.500",
+        "镜头": "[Shot 3] At 00:05.500",
+        "带货功能": "proof",
+        "卖点承载": "primary",
+        "目的": "价值证明·缓震",
+        "视觉主导": "厚切分层缓震叠层受压轻微压缩后回弹，外底后跟弧线可见",
+        "运镜": "推近",
+        "款式": "单款·结构特写",
+        "文案": {
+          "onscreen_en": "",
+          "voiceover_zh": "这双踩下去先是软，然后马上回弹，落地那一下不砸膝盖。",
+          "post_zh": ""
+        },
+        "颜色": "—",
+        "文字效果": "无画面文字",
+        "转场": "原生切镜",
+        "节奏": "中",
+        "音频模式": "V",
+        "音轨锚点": ""
+      },
+      {
+        "时间段": "00:08.500-00:11.000",
+        "镜头": "[Shot 4] At 00:08.500",
+        "带货功能": "proof",
+        "卖点承载": "secondary-1",
+        "目的": "价值证明·透气",
+        "视觉主导": "一道中性柔光带横扫过贾卡网面，扫过处孔洞透亮",
+        "运镜": "特写平移",
+        "款式": "单款·材质特写",
+        "文案": {
+          "onscreen_en": "AIR FLOWS THROUGH",
+          "voiceover_zh": "鞋面是贾卡网布，光打过去能看出孔洞，夏天穿不闷脚。",
+          "post_zh": ""
+        },
+        "颜色": "深灰（浅底前半）",
+        "文字效果": "单行，落在网面上方干净留白带、偏左；绝不压深色网面",
+        "转场": "原生切镜",
+        "节奏": "中",
+        "音频模式": "V",
+        "音轨锚点": ""
+      },
+      {
+        "时间段": "00:11.000-00:13.500",
+        "镜头": "[Shot 5] At 00:11.000",
+        "带货功能": "trust",
+        "卖点承载": "primary",
+        "目的": "信任·结构证据",
+        "视觉主导": "中底分层结构特写，材质工艺可辨",
+        "运镜": "旋转",
+        "款式": "单款·结构特写",
+        "文案": {
+          "onscreen_en": "",
+          "voiceover_zh": "中底是 EVA 高弹发泡，分层你肉眼看得见。鞋码正常，脚宽的按平时码来。",
+          "post_zh": "EVA 高弹发泡"
+        },
+        "颜色": "—",
+        "文字效果": "无画面文字（证据标签走后期）",
+        "转场": "原生切镜",
+        "节奏": "中",
+        "音频模式": "V",
+        "音轨锚点": ""
+      },
+      {
+        "时间段": "00:13.500-00:16.208",
+        "镜头": "[Shot 6] At 00:13.500",
+        "带货功能": "cta",
+        "卖点承载": "—",
+        "目的": "收尾·CTA",
+        "视觉主导": "产品居中收束，单一全画幅，无额外图形",
+        "运镜": "静置",
+        "款式": "单款·收束",
+        "文案": {
+          "onscreen_en": "LIGHT AS AIR",
+          "voiceover_zh": "129 起，36 到 45 码，链接我放下面了。",
+          "post_zh": "￥129 起 · 36–45 码 · AIGC 标识"
+        },
+        "颜色": "商品色",
+        "文字效果": "单行，收束构图上方留白带内；末尾 3 s CTA 图文落定",
+        "转场": "—",
+        "节奏": "慢（收束）",
+        "音频模式": "V",
+        "音轨锚点": ""
+      }
+    ]
+  },
+  "adapter_rules": {
+    "_comment": "side_a → side_b 的转换规则；实现为无状态纯函数，便于回归测试。",
+    "0_structure": "⭐ v2.0 新增：先读 structure.skeleton 决定五段骨架，再逐 beat 填 beat_function。缺 beat_function 的 beat 直接拒绝转换（不许猜）",
+    "1_time": "按 beat.start/end 转 00:MM.mmm 格式，再吸附到 17k+5 帧网格 @24fps",
+    "2_shot": "相邻两镜若『只改景别』则合并为运镜（禁止只变景别的切镜）；否则拆为 [Shot N] At HH:MM.mmm",
+    "3_camera": "文字层运镜预设 → 动作白名单（举起/并排/推近/旋转/开合/滑入/光影流动/静置/特写平移）；不在白名单内的一律降级为『推近』或『静置』，并记 warning",
+    "4_text_split": {
+      "onscreen_en": "由中文卖点重写为 3-5 个英文词、单行、可读；逐字写进 H3 prompt（闸门③第1条校验）；⚠️ 必须同时输出落位声明",
+      "voiceover_zh": "中文口播 → 送 TTS 出【整条音轨】。送达方式二选一：L 模式锚进 H3（AddGuide(audio)）/ V 模式后期直贴。⚠️ 禁止 H3 自念台词（音色不可控）。",
+      "post_zh": "价格/CTA/合规标识一律后期叠加，绝不交给模型画",
+      "soundscape": "⭐ v2.1 新增：environment/foley 短句写进 H3 prompt 的 overall_soundscape / non_diegetic_music。H3 是音视频联合生成，写好即自带环境音与拟音。"
+    },
+    "5_color": "套官方两段配色：白底科技风前半用深色；黑底轮廓光后半用商品色",
+    "6_gate2": "⭐ v2.1：转完后必须过闸门②【三闸】：闸A 动作白名单 + 四类禁写；闸B 文案合规；闸C 音频可行性（字数/路线唯一/L镜资格/不跨段/音轨总长）。",
+    "7_reject": "任一行触发闸门②否决 → 整行退回文字层重写，不得进入生成",
+    "8_selling_point_coverage": "转换后必须回填『卖点覆盖表』：primary 与 secondary 每一条都要有承载镜；spec 允许只走后期。缺覆盖 ⇒ 拒绝定稿",
+    "9_audio_mode": "⭐ v2.1 新增：逐镜判音频模式（三层路由：品类 → 逐镜 → 全片一致性）。全身远景运动镜一律判 V。",
+    "10_audio_first": "⭐ v2.1 新增：TTS 轨必须早于 H3 生成产出；段长由 track_manifest.json 的句末时间决定。"
+  },
+  "gate2_merged_rules": {
+    "_comment": "闸门② 三闸完整判据。闸A 动作（实测+ClipForge 同源）｜闸B 文案合规（v2.0）｜闸C 音频可行性（v2.1 新增）。",
+    "gate_a_action": {
+      "whitelist": [
+        "举起",
+        "并排",
+        "推近",
+        "旋转",
+        "开合",
+        "滑入",
+        "光影流动",
+        "静置",
+        "特写平移"
+      ],
+      "forbidden_by_physics": [
+        "涂开",
+        "倒出",
+        "拧开",
+        "涂抹",
+        "挤压出液"
+      ],
+      "forbidden_by_generability": [
+        "双主体精确交互",
+        "内部心理活动",
+        "否定式动作",
+        "一拍三步动作链"
+      ],
+      "hard_rule": "每镜动作数 = 1；含可验证物理结果的动作 → 否决"
+    },
+    "gate_b_compliance": {
+      "checks": [
+        "极限词表零命中",
+        "功效承诺均有依据（否则降级为体感描述）",
+        "价格 / 尺码 / CTA 不出现在画面英文里",
+        "画面英文每镜 ≤5 词且单行",
+        "画面英文已声明落位（否则必出文字压产品事故）"
+      ],
+      "fail_action": "退回文字层换词 / 移层 / 补声明"
+    },
+    "gate_c_audio": {
+      "_comment": "v2.1 新增。音频层上线后的前置硬约束。",
+      "checks": [
+        "口播字数 > 目标时长 × 5 字/秒 ⇒ 退回删句（先删 ③ 的形容词，再删 ② 的修饰）",
+        "口播字数 < 目标时长 × 4 字/秒 ⇒ 内容太薄，补一个『事实』而非形容词",
+        "整片音轨路线不唯一（既有 L 又贴后期）⇒ 收敛到单一路线",
+        "标了 L 的镜没有可辨识人脸 / 不在说话构图 ⇒ 降为 V",
+        "标了 L 的镜同时有大幅手部/产品动作 ⇒ 拆镜或降为 V",
+        "L 镜跨了生成段 ⇒ 重排生成分组",
+        "音轨总长 ≠ 成片总长（句间缝隙 > 0.3/0.5 s）⇒ 重做 TTS 轨",
+        "走 L 且是中文配音但未做标定 ⇒ 先跑标定（中文口型同步零实测数据）"
+      ],
+      "fail_action": "退回上层重做，不得进入生成（返工代价 = 单段 22–38 min）"
+    }
+  },
+  "verification": {
+    "contract_test": "两侧各写一个解析器；用本文件的 rows 样例互测，任一侧解析失败即契约不成立",
+    "schema_check": "每个 beat 必须有 beat_function 且取值在 beat_functions 五个键内；primary 唯一；每镜必须有 音频模式 ∈ {L,V,N}",
+    "coverage_check": "primary + secondary 全部有承载镜（回填卖点覆盖表）",
+    "end_to_end": "文字层出稿 → adapter → 15 列 → S1.5 分组 → 闸门②三闸 → --dry 出节点图，全绿才算连通",
+    "audio_check": "⭐ v2.1：口播字数落在 时长×4–5 字/秒；全片音轨路线唯一；无 L 镜跨段；音轨总长 = 成片总长",
+    "grouping_check": "⭐ v2.1：每段 ≤ 362 帧；段边界贴音轨句末/转场；每段 2–4 镜"
+  },
+  "duration_tiers": {
+    "_comment": "⭐ v2.1 核心。目标时长三档 + 五段精确分配 + 口播字数。行业主流是 40 s；16 s 装五段必然语速超速（5.99 字/秒）。",
+    "tiers": {
+      "short_32": {
+        "label": "精简",
+        "target_s": 32.0,
+        "target_frames": 768,
+        "stage_s": {
+          "hook": 2.56,
+          "pain": 5.44,
+          "proof": 11.84,
+          "trust": 6.4,
+          "cta": 5.76
+        },
+        "voiceover_words": {
+          "min": 128,
+          "max": 160
+        },
+        "revive_hook_s": "12.8–19.2",
+        "expected_gpu_min_rerollable": 58,
+        "fit": "钩子强、单卖点、投流测试量"
+      },
+      "standard_40": {
+        "label": "标准（推荐）",
+        "target_s": 40.0,
+        "target_frames": 960,
+        "stage_s": {
+          "hook": 3.2,
+          "pain": 6.8,
+          "proof": 14.8,
+          "trust": 8.0,
+          "cta": 7.2
+        },
+        "voiceover_words": {
+          "min": 160,
+          "max": 200
+        },
+        "revive_hook_s": "16.0–24.0",
+        "expected_gpu_min_rerollable": 97,
+        "fit": "五段完整展开，行业主流"
+      },
+      "long_50": {
+        "label": "长片",
+        "target_s": 50.0,
+        "target_frames": 1200,
+        "stage_s": {
+          "hook": 4.0,
+          "pain": 8.5,
+          "proof": 18.5,
+          "trust": 10.0,
+          "cta": 9.0
+        },
+        "voiceover_words": {
+          "min": 200,
+          "max": 250
+        },
+        "revive_hook_s": "20.0–30.0",
+        "expected_gpu_min_rerollable": 123,
+        "fit": "高客单价、需多卖点铺陈"
+      }
+    },
+    "stage_ratio": {
+      "_comment": "可缩放到任意目标时长的比例表；先按比例算，再受下限/上限夹取。",
+      "hook": {
+        "pct": 8,
+        "min_s": 2.5,
+        "max_s": 4.0
+      },
+      "pain": {
+        "pct": 17,
+        "min_s": 4.0,
+        "max_s": 8.5
+      },
+      "proof": {
+        "pct": 37,
+        "min_s": 10.0,
+        "max_s": 18.5
+      },
+      "trust": {
+        "pct": 20,
+        "min_s": 5.0,
+        "max_s": 10.0
+      },
+      "cta": {
+        "pct": 18,
+        "min_s": 4.0,
+        "max_s": 9.0
+      }
+    },
+    "words_per_sec": {
+      "min": 4,
+      "max": 5
+    },
+    "frame_grid_rule": "时长必须贴 17k+5 帧 @24fps；单段上限 362 帧 = 15.083 s",
+    "cost_scaling": {
+      "formula": "t(f) ≈ 431 × (f/124)^1.70 秒（768×1344 / 8 步 / 3090 显存受限）",
+      "measured_anchors": {
+        "124": "431 s",
+        "243": "1325.5 s"
+      },
+      "per_second_gpu_s": {
+        "124": 83,
+        "192": 113,
+        "243": 134,
+        "362": 177
+      },
+      "warning": "实测锚点只到 243 帧，>243 为外推；且 431 s 是显存受限 15.4 GB 下的值，独占 24 GB 应更快（未测）"
+    },
+    "split_count_note": "⭐ 分段数不由成本决定：允许逐段重抽时『段越短越省』（超线性），要求一次过时『段越少越省』（S 是指数项）—— 两模型结论相反 ⇒ 按内容定。"
+  },
+  "audio_layer": {
+    "_comment": "⭐ v2.1 核心。H3 在这一环是『音画同步器』，不是『配音员』。配音由外部 TTS 出（音色可控）。",
+    "concept_fix": {
+      "claim": "H3 不负责配音，只负责把已有语音同步进画面",
+      "evidence": {
+        "fl2va_addguide_audio": "音频编成 audio_latent，每步重新注入、不参与去噪 ⇒ 音轨内容保留、画面被牵引对齐。实测 DTW 0.036 vs 他句 0.20（内容级保留）✅",
+        "ref2va_d_tag": "H3 自生成台词，ASR 5/5 逐字准 ✅；但 Ref2VA 链不锁身份（ref_image_size=max 也救不回）⇒ 已弃为生产主链路",
+        "ref2va_ref_audios": "音色参考实测零效果（两组独立 A/B 音轨逐位相同），却让算力 +95~115% ❌"
+      },
+      "consequence": "配音一律走外部 TTS；H3 只做同步"
+    },
+    "modes": {
+      "L": {
+        "zh": "口型同步",
+        "picture": "有可辨识人脸且在说话构图（中近景 / 正侧脸 / 嘴可见）",
+        "audio_route": "H3 锚定（AddGuide(audio) 挂生成段首）",
+        "lip": "跟随（实测零时滞 r≈0.44–0.53）",
+        "timbre": "H3 重渲染（波形相关 0.27）",
+        "cost": "≈0 增量"
+      },
+      "V": {
+        "zh": "画外音",
+        "picture": "无脸 / 脸不可辨（全身远景、运动中）/ 产品特写 / 空镜",
+        "audio_route": "后期直贴（H3 只出环境音）",
+        "lip": "无",
+        "timbre": "TTS 音色 100% 保留",
+        "cost": "0（不锚音频）"
+      },
+      "N": {
+        "zh": "纯环境音",
+        "picture": "需 ASMR / 拟音 / 氛围（钩子镜、纯视觉镜）",
+        "audio_route": "不贴语音，保留 H3 原生 overall_soundscape",
+        "lip": "无",
+        "timbre": "—",
+        "cost": "0（提示词声明）"
+      }
+    },
+    "routing": {
+      "layer1_category": {
+        "question": "产品必须靠『人的脸/身体』才成立吗？",
+        "yes_categories": [
+          "美妆上妆",
+          "个护上脸",
+          "服饰上身",
+          "食品入口",
+          "健身示范",
+          "母婴使用"
+        ],
+        "yes_result": "必须有至少一镜 L ⇒ 该片带 L 镜（路线见 layer3_consistency）",
+        "no_categories": [
+          "鞋类",
+          "3C",
+          "家电",
+          "家居",
+          "玩具",
+          "工具"
+        ],
+        "no_result": "推荐以 V 为主体；**可补 L** —— 补 L 的落点必须落在一个「独立生成段 + 口播句完整落在段内」的镜上（实例见 REPORT31 §二）"
+      },
+      "layer2_per_shot": {
+        "rules": [
+          {
+            "if": "无可辨识人脸",
+            "then": "V"
+          },
+          {
+            "if": "有脸 + 中近景/正侧脸/嘴可见",
+            "then": "L"
+          },
+          {
+            "if": "有脸但全身远景 / 运动中 / 背影 / 侧脸遮挡",
+            "then": "V",
+            "why": "嘴不可辨；实测『动作与语音时间重叠』段口型测量被干扰（r 掉到 0.16–0.36）"
+          },
+          {
+            "if": "需 ASMR / 拟音 / 氛围",
+            "then": "N"
+          }
+        ]
+      },
+      "layer3_consistency": {
+        "_v2_note": "v1.0 的『全片只走一条路，禁 L+V 混用』把两条独立约束捆在一起，代价是为一个 7 s 镜头牺牲整片音色。v2.0 拆开。",
+        "constraint_1_track_single_source": {
+          "rule": "成片音轨必须有唯一来源：要么全片 H3 渲染，要么全片贴 TTS 原音。L 镜不得额外贡献音轨。",
+          "what_it_protects": "音色一致性",
+          "violation": "音轨来源拼接 ⇒ 观众听到『换人说话了』"
+        },
+        "constraint_2_v_shot_no_talking_face": {
+          "rule": "标 V 的镜不得出现『脸可辨 + 说话构图』",
+          "what_it_protects": "口型不穿帮",
+          "violation": "观众看到嘴型对不上声音"
+        },
+        "why_separate": "L/V 描述的是『画面驱动方式』，音色断层来自『音轨来源拼接』—— 不同维度。只要音轨单源，同片 L 镜与 V 镜共存不会产生音色断层。",
+        "routes": [
+          {
+            "id": "beta",
+            "name": "单源 TTS + L 镜牵引",
+            "recommended": true,
+            "track_source": "唯一：vo/track_full.wav（TTS 原音）",
+            "picture_drive": "L 镜挂 AddGuide(audio)；其余镜不挂；丢弃 H3 渲染出的音轨",
+            "timbre": "100% 保留",
+            "precondition": "该语言口型已过标定：r>=0.30 且 |滞后|<=2 帧",
+            "fallback": "标定不通过 ⇒ 该镜退回 V（改画外音，零损失）"
+          },
+          {
+            "id": "alpha",
+            "name": "全片锚 H3",
+            "recommended": false,
+            "track_source": "H3 渲染出的音轨",
+            "picture_drive": "每段都挂 AddGuide(audio)",
+            "timbre": "H3 重渲染（波形相关 0.27）",
+            "when": "beta 标定不通过、又必须全片口型"
+          },
+          {
+            "id": "plain_v",
+            "name": "纯 V",
+            "recommended": false,
+            "track_source": "唯一：TTS",
+            "picture_drive": "全片不挂",
+            "timbre": "100% 保留",
+            "when": "无 L 镜"
+          }
+        ]
+      }
+    },
+    "hard_rules": [
+      {
+        "id": "AUD-1",
+        "rule": "说话时别做别的：L 镜不得同时安排大幅手部/产品动作",
+        "evidence": "REPORT3 §4.2：动作与语音时间重叠 ⇒ 口型测量被干扰（②④⑤ 段 r 0.16–0.36；静止对照镜恢复到 0.437@0帧）"
+      },
+      {
+        "id": "AUD-2",
+        "rule": "L 镜不得跨生成段：一个口型镜必须整镜落在同一生成段内",
+        "why": "跨段 ⇒ 语音被两次独立重渲染 ⇒ 边界音色 + 口型双断"
+      },
+      {
+        "id": "AUD-3",
+        "rule": "音轨单源：成片音轨只能有一个来源",
+        "why": "音色断层来自音轨来源拼接，不是来自 L/V 画面驱动方式的共存",
+        "evidence": "REPORT31 §五"
+      },
+      {
+        "id": "AUD-4",
+        "rule": "V 镜不得出现『脸可辨 + 说话构图』",
+        "why": "V 镜画面不由音频驱动 ⇒ 脸在说话但口型对不上，穿帮",
+        "evidence": "REPORT31 §五 / 约束②"
+      }
+    ],
+    "audio_first_ordering": {
+      "rule": "⭐ 工序次序：TTS 出整条音轨必须发生在 H3 生成【之前】",
+      "why": "H3 音频锚点是『锚在帧索引上、裁到视频剩余时长』⇒ 音轨时长必须先定。反过来一旦口播装不下就是整段重跑（40 s 片单段 22–38 min）",
+      "deliverables": [
+        "vo/track_full.wav",
+        "vo/track_manifest.json（每句起止时间）"
+      ],
+      "run_location": "⚠️ 必须 CPU / 本地 Mac —— TTS 与 ASR 都不得占 3090 的 CUDA（GPU 隔离红线延伸）"
+    },
+    "unverified": [
+      {
+        "item": "中文口型同步",
+        "status": "零实测数据（REPORT3/5 全程只用英文）",
+        "gate": "上 L 前必须跑标定：中文配音 + 静止脸对照镜 ⇒ lipsync2.py 互相关 r ≥ 0.30 且滞后 ≤ 2 帧"
+      },
+      {
+        "item": "H3 中文语音质量（走 <d> 自生成）",
+        "status": "未验证",
+        "action": "生产主链路不走 <d>，配音一律外部 TTS"
+      },
+      {
+        "item": "多音频锚点叠加",
+        "status": "未验证",
+        "action": "本期规避：整条音轨作单锚点挂段首"
+      },
+      {
+        "item": "中文口型同步（Mandarin lip-sync）",
+        "status": "标定中",
+        "evidence": "REPORT3/5 全程英文，中文零数据",
+        "calibration": "A 轨=真实句④音频 / B 轨=静音，同 seed 单变量；判据 r(A)>>r(B) 且 |滞后|<=2 帧",
+        "script": "run_L_calib.sh + liproi.py"
+      }
+    ],
+    "tts_track_spec": {
+      "file": "vo/track_full.wav",
+      "sample_rate": 32000,
+      "channels": "单或双",
+      "duration_tolerance_s": 0.3,
+      "timbre": "全片统一（跨片也统一）",
+      "words_per_sec": "4–5（= 字数 ÷ 目标时长）",
+      "sentence_gap_s": {
+        "L": 0.3,
+        "V": 0.5
+      }
+    },
+    "l_shot_spec": {
+      "anchor_audio": "该段整段音轨切片（时长必须 = 段长：帧数/24 秒，逐位一致）",
+      "frame_idx": 0,
+      "first_frame_equals_last_frame": true,
+      "why_still": "静止脸排除人体位移干扰；实测全身运动镜口型互相关 r=0.52/0.79 是误判",
+      "roi_rule": "口部 ROI 必须目视定位并核验『不含眼睛』（自动搜索会被发际/头发干扰）",
+      "host_frame_canvas": "首帧必须贴【画布比例】而非宽高比标签：H3 9:16@0.98MP 经 resolve_px 得 768x1344 = 0.5714，不是 9/16 = 0.5625",
+      "product_in_frame": "false（产品走后期 PIP）—— 图像模型必改产品，且手持 = 手部运动 ⇒ 污染口型信号"
+    }
+  },
+  "generation_grouping": {
+    "_comment": "⭐ v2.1 新增步骤 S1.5。把 15 列表的相邻镜合并成『一条片内多镜』的生成段。",
+    "output": "生成分组表 G1…Gn",
+    "constraints": {
+      "max_frames_per_segment": 362,
+      "boundary_rule": "段边界贴音轨句末 + 落在转场点（不切在动作中段、不留半句话）",
+      "shots_per_segment": [
+        2,
+        4
+      ],
+      "shots_per_segment_why": "超 4 镜 ⇒ 单镜被压到 <2 s，动作做不完（H3 每段真实『在动』时间恒定 1.4–2.3 s）",
+      "L_shot_must_not_span_segments": true,
+      "L_audio_anchor": "整条音轨作单锚点挂段首（不做多锚点叠加）"
+    },
+    "cost_note": "⭐ 分段数不由成本决定：允许逐段重抽时『段越短越省』（超线性），要求一次过时『段越少越省』（S 是指数项）—— 两模型结论相反 ⇒ 按内容定。"
+  },
+  "audio_judge": {
+    "_comment": "⭐ v2.1 新增。判官团的音频层（A 段）。全部本地 CPU，零 GPU —— 一项都不进 L2（能用算术判的不要问 VLM）。",
+    "scripts": {
+      "judge": "scripts/judge_audio.py",
+      "lip": "scripts/lipsync2.py",
+      "content": "scripts/audio_match.py"
+    },
+    "items": {
+      "A-01": {
+        "claim": "音轨存在且非静音",
+        "method": "能量均值",
+        "threshold": "> -50 dB",
+        "cost": "<1 s",
+        "status": "✅ 复用既有 L0-05",
+        "calibrated": true
+      },
+      "A-02": {
+        "claim": "口播内容与文案逐字一致",
+        "method": "faster-whisper CPU int8 转写 + 文本相似度",
+        "threshold": "≥ 0.90（容同音误差）",
+        "cost": "数秒",
+        "status": "🆕 需标定",
+        "calibrated": false
+      },
+      "A-03": {
+        "claim": "口型与语音同步",
+        "method": "脸区搜索 + 互相关峰值与时滞（lipsync2 算法）",
+        "threshold": "r ≥ 0.30 且滞后 ≤ 2 帧",
+        "cost": "数秒",
+        "status": "🆕 需标定；仅 L 镜，V/N 镜判 na",
+        "calibrated": false
+      },
+      "A-04": {
+        "claim": "语音在段内结束",
+        "method": "能量包络末活跃点 vs 段长",
+        "threshold": "尾部空闲 ≤ 1.0 s、无跨段截断",
+        "cost": "<1 s",
+        "status": "🆕 纯算术",
+        "calibrated": true
+      },
+      "A-05": {
+        "claim": "跨段音色一致",
+        "method": "各段 F0 中位数 + 频谱质心",
+        "threshold": "相邻段 |ΔF0| ≤ 15%",
+        "cost": "<1 s",
+        "status": "🆕 需标定；多段才启用",
+        "calibrated": false
+      }
+    },
+    "disciplines": [
+      "能用算术判的不要问 VLM ⇒ 全部本地 CPU",
+      "ASR 必须 CPU int8（faster-whisper 在 4090 上 OOM，实测）⇒ GPU 隔离红线延伸：TTS 与 ASR 都不得占 3090 CUDA",
+      "新增判项必须两头标定才能上线（R-08 的教训）：标定前只报数值、不参与否决；输出带 uncalibrated 标记"
+    ]
+  },
+  "version": "2.2"
+}

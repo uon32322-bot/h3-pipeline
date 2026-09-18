@@ -1,0 +1,24 @@
+# ============================================================================
+# H3 带货视频流水线 · ComfyUI 独立实例 · 模型路径映射
+#
+#  作用：让本项目自持的 ComfyUI 实例只读本项目 $ROOT/models 下的权重，
+#        不触碰共享实例的模型目录，也不与其他项目共享任何权重文件。
+#
+#  用法：启动时加 --extra-model-paths-config <本文件>
+#
+#  依据：部署指南 §1.1 模型独立化（D6 项目完全独立 · 零软链）
+# ============================================================================
+
+h3p:
+    base_path: /root/autodl-tmp/h3p/models/
+    checkpoints: checkpoints
+    diffusion_models: |
+        diffusion_models
+        unet
+    text_encoders: |
+        text_encoders
+        clip
+    vae: vae
+    loras: loras
+    embeddings: embeddings
+    upscale_models: upscale_models

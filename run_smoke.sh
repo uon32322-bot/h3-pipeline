@@ -1,0 +1,1 @@
+bash /root/ComfyUI/input/v6/smoke_run.sh

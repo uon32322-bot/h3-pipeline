@@ -1,0 +1,395 @@
+{
+  "shot": "D_产品动态卖点_luna",
+  "video": "raw/D_product_dynamic.mp4",
+  "prompt_file": "prompt/D_product_dynamic.txt",
+  "judge_model": "tt-5.6-luna",
+  "ts": "2026-09-18 07:33:45",
+  "items": [
+    {
+      "id": "L0-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 243.0,
+        "threshold": "n%17==5"
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "resolution",
+        "value": 768.0,
+        "threshold": 768.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 243.0,
+        "threshold": 243.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": -14.0,
+        "threshold": -50.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": 0.0,
+        "threshold": 1.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 62,
+        "region": "luma",
+        "value": 0.0,
+        "threshold": 0.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-08",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 3,
+        "region": "whole-frame",
+        "value": 1.125,
+        "threshold": 0.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "motion-break",
+        "value": 0.0,
+        "threshold": 3.0
+      },
+      "confidence": "high",
+      "kind": "random",
+      "spikes": 0,
+      "declared_cuts_frames": [
+        60,
+        132,
+        170,
+        209
+      ],
+      "spikes_at_declared_cuts": 4
+    },
+    {
+      "id": "L1-10",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "frame-alternation",
+        "value": 2.022,
+        "threshold": 0.55
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-11",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": "subject-in-frame",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "note": "背景类型=macro，出框余量算术不适用"
+    },
+    {
+      "id": "L1-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "product",
+        "value": 4.45,
+        "threshold": 8.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "tone",
+        "value": 1.17,
+        "threshold": 6.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-01",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (na,na,na)"
+    },
+    {
+      "id": "P-02",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (na,na,na)"
+    },
+    {
+      "id": "P-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-05",
+      "verdict": "no",
+      "evidence": {
+        "frame": 220,
+        "region": "left and top edges of sneakers cropped out of frame",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "2/3 (no,yes,no)"
+    },
+    {
+      "id": "P-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 44,
+        "region": "full frame pair of sneakers on pale blue backdrop",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 44,
+        "region": "center pair of black-and-white mesh sneakers",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "full frame pale blue studio backdrop with floating sneakers",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 35,
+        "region": "center pair of sneakers",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-04",
+      "verdict": "no",
+      "evidence": {
+        "frame": 173,
+        "region": "upper-left overlay text 'Air Flows Right Through' sitting on the shoe mesh rather than the pale backdrop",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "2/3 (yes,no,no)"
+    },
+    {
+      "id": "R-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 44,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "W-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "W-03",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "2/3 (na,yes,na)"
+    },
+    {
+      "id": "W-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "2/3 (yes,no,yes)"
+    },
+    {
+      "id": "W-06",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (na,na,na)"
+    },
+    {
+      "id": "W-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    }
+  ],
+  "aggregate": {
+    "verdict": "REJECT",
+    "l0_no": [],
+    "l1_no": [],
+    "rw_no": [
+      "R-04"
+    ],
+    "p_no": [
+      "P-05"
+    ],
+    "low_conf_no": [],
+    "na_ratio": 0.182,
+    "warnings": [],
+    "reasons": [
+      "R/W 段否决项: R-04"
+    ],
+    "remedies": []
+  }
+}

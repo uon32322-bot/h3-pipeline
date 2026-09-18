@@ -1,0 +1,244 @@
+version: "1.0"
+date: "2026-09-17"
+source: "REPORT15_判官团配置与崩坏处理总表.md"
+note: >
+  机器可读的判官团配置。阈值字段以 tau_ 前缀占位，未标定前不得投入生产。
+  所有 verdict 取值：yes | no | na。禁止总分字段、禁止 free-text 理由字段。
+
+# ---------- 全局形态规则（判官最擅长的评判形式） ----------
+judge_form:
+  atomic: true                # F1: 一项 = 一个可观察的二值事实
+  one_question_per_call: true # F2: N 项 = N 次独立调用，禁止合并
+  evidence_first: true        # F3: 先输出证据（帧号/区域），再给判定
+  verdict_values: [yes, no, na]  # F4: 必须提供 N/A 出口
+  no_score: true              # F5: 禁止总分
+  no_free_text_reason: true   # F5: 禁止自由叙述理由
+  dual_sample_keys:           # F6: 关键项双采样，不一致升级人工
+    - W-01
+    - W-02
+    - W-04
+    - P-01
+  version_lock: true          # F7: 模型/权重/prompt 版本全量入 runs.jsonl
+
+output_contract:
+  schema:
+    item_id: string
+    verdict: "yes | no | na"
+    evidence:
+      frame: int|null      # 帧号（视频类判项）
+      region: string|null  # 画面区域（如 bottle-top / hand-left）
+      value: float|null    # L1 数值项
+      threshold: float|null
+    confidence: "high | medium | low"
+  forbidden_fields: [score, total_score, reason, explanation, comment]
+
+aggregation:
+  rule: "R 段或 W 段任一 no → 否决"
+  perception_rule: "P 段 no 计数 >= 2 → 否决"
+  na_rule: "全 na 的 R/W 项不计入否决，但计入覆盖率"
+  coverage_warning: "单条 na 比例 > 40% → 人工复核清单"
+
+# ---------- L0 技术校验（<1s，纯算术，零模型） ----------
+l0:
+  - id: L0-01
+    check: 解码成功
+    method: ffprobe_returncode
+    reject: true
+  - id: L0-02
+    check: 帧数符合 17k+5 网格
+    method: frame_count_mod
+    reject: true
+  - id: L0-03
+    check: 分辨率 = 声明值（0.98MP = 1344x768）
+    method: resolution_equal
+    reject: true
+  - id: L0-04
+    check: 时长 = 声明值 ±1 帧
+    method: duration_tolerance_frames
+    reject: true
+  - id: L0-05
+    check: 音轨存在且非全静音
+    method: audio_rms
+    reject: true
+  - id: L0-06
+    check: 无黑屏 / 全白帧段
+    method: luma_range
+    reject: true
+  - id: L0-07
+    check: 无长静音（> 1.5s）
+    method: vad
+    reject: true
+  - id: L0-08
+    check: 容器完整可播
+    method: ffprobe_error_scan
+    reject: true
+
+# ---------- L1 专用检测器（5-20s/段，本地 CPU） ----------
+# 阈值原则：假阴性比假阳性更致命 → 取保守侧。全部待标定。
+l1:
+  - id: L1-01
+    check: 人脸嵌入距离
+    method: arcface_cosine
+    tau: tau_face
+    op: "<"
+    failure_type: random
+    redraw: true
+    breakdown: 身份漂移
+  - id: L1-02
+    check: 产品 ROI 相似度
+    method: roi_histogram_embedding
+    tau: tau_prod
+    op: ">"
+    failure_type: mixed
+    redraw: true
+    breakdown: 产品漂移
+  - id: L1-03
+    check: 光流幅度（动作是否真发生）
+    method: farneback_flow_mean
+    tau: tau_flow
+    op: ">"
+    extra: "且无 >0.5s 平台"
+    failure_type: mixed
+    redraw: true
+    breakdown: 动作未发生 / 空转
+  - id: L1-04
+    check: 光流断裂点（动作跳变）
+    method: flow_second_derivative_peak
+    tau: tau_break
+    op: none_allowed
+    failure_type: structural
+    redraw: false
+    breakdown: 动作中断 / 因果链断裂
+  - id: L1-05
+    check: 跨段直方图 / 调色板相似
+    method: adjacent_segment_hist
+    tau: tau_tone
+    op: ">"
+    failure_type: random
+    redraw: true
+    breakdown: 接缝色调漂移
+  - id: L1-06
+    check: OCR 逐字比对
+    method: paddleocr_edit_distance
+    tau: 0
+    op: "=="
+    failure_type: random
+    redraw: true
+    breakdown: 画面文字糊
+  - id: L1-07
+    check: 唇音互相关
+    method: mouth_roi_x_audio_envelope
+    tau: tau_lip
+    op: ">"
+    failure_type: random
+    redraw: true
+    breakdown: 音画不对齐
+  - id: L1-08
+    check: 状态跟踪（状态落正确帧号）
+    method: state_track_py
+    tau: tau_state_window
+    op: within
+    failure_type: structural
+    redraw: false
+    breakdown: 状态不守恒
+  - id: L1-09
+    check: 手部关键点计数
+    method: mediapipe_hands
+    tau: tau_hand
+    op: valid_five_fingers
+    failure_type: random
+    redraw: true
+    breakdown: 手部畸形
+  - id: L1-10
+    check: 帧间差分周期性（闪烁）
+    method: diff_fft_peak
+    tau: tau_flicker
+    op: none_allowed
+    failure_type: random
+    redraw: true
+    breakdown: 纹理闪烁
+
+# ---------- L2 VLM 原子清单（逐项独立调用，只跑幸存者） ----------
+# R 段每项按产品/分镜表生成；W/P 段为通用项。
+l2:
+  # ⛔ 模型白名单（辉哥规范 2026-09-18）：只允许 tt-5.6-luna，禁止再调用任何其他同类多模态模型。
+  #    执行位置：judge_shot.py → ALLOWED_VLM_MODELS（违规立即 sys.exit，不靠自觉）。
+  #    变更历史：原 doubao-seed-2-1-pro-260628 已废弃 —— 它越出了「单一供应商模型」边界。
+  model: tt-5.6-luna
+  provider: "灵炫 api.lk888.ai（与生图 tt-image-2 同网关、同一把 Key）"
+  banned_models: ["doubao-seed-*", "gem-*", "omni-*", "qwen*-vl", "kimi*", "glm*", "deepseek-*", "MiniMax-*"]
+  instruction_following:
+    note: "判据一律来自 prompt 原文，不是参考视频"
+    items:
+      - {id: R-01, check: 画面主体是否为 prompt 声明的产品, per_product: true}
+      - {id: R-02, check: 是否出现 prompt 声明的场景/背景, per_product: true}
+      - {id: R-03, check: 是否按 prompt 出现声明的动作, per_product: true}
+      - {id: R-04, check: 画面文字内容是否与 prompt 逐字一致, per_product: true, na_when: "中文/价格"}
+      - {id: R-05, check: 画幅比例是否与声明一致, per_product: true}
+      - {id: R-06, check: 是否出现 prompt 未声明的多余元素, per_product: true}
+      - {id: R-07, check: 结尾镜是否单一全画幅（无网格/分屏）, per_product: false}
+  world_consistency:
+    items:
+      - {id: W-01, check: 产品形态/颜色在本段内是否自洽, key: true}
+      - {id: W-02, check: 液体/用量等状态是否守恒, key: true, na_when: "无该状态"}
+      - {id: W-03, check: 接触面是否合理（无穿插/无悬空）, na_when: "无接触"}
+      - {id: W-04, check: 动作因果是否成立（先开后倒）, key: true, na_when: "无因果链"}
+      - {id: W-05, check: 光影/阴影方向是否自洽}
+      - {id: W-06, check: 人物身份是否与锚定图一致}
+      - {id: W-07, check: 是否存在未完成/中断的动作}
+  perception:
+    threshold: 2   # P 段 no >= 2 → 否决
+    items:
+      - {id: P-01, check: 手部是否有畸形/多指/缺指, key: true}
+      - {id: P-02, check: 面部是否有畸变}
+      - {id: P-03, check: 纹理闪烁/糊化}
+      - {id: P-04, check: 边缘撕裂/伪影}
+      - {id: P-05, check: 主体是否在画面安全区内}
+      - {id: P-06, check: 画面整体可辨识（非严重崩坏）}
+
+# ---------- 崩坏分诊表（16 类） ----------
+# redraw: true = 换 seed 重抽有效；false = 禁止重抽，必须改方案
+breakdowns:
+  - {no: 1,  name: 身份漂移,        detect: [L1-01],            type: random,     redraw: true,  fix: "FL2VA 同源编辑链 + 换 seed 重抽"}
+  - {no: 2,  name: 产品漂移,        detect: [L1-02, R-01],      type: mixed,      redraw: true,  fix: "3 张独立锚定照 + 首尾帧同源派生；有 logo 走混合合成"}
+  - {no: 3,  name: 参考不生效,      detect: [ref_sensitivity],  type: structural, redraw: false, fix: "查接线（/history 反查）+ 确认非 T2V 模式"}
+  - {no: 4,  name: 短英文文字糊,    detect: [L1-06, R-04],      type: partial,    redraw: true,  fix: "1 中段 + 1 结尾各 <=3-5 词；中文/价格/复杂 logo 后期叠加"}
+  - {no: 5,  name: 接缝色调漂移,    detect: [L1-05],            type: random,     redraw: true,  fix: "同源派生图 + 统一调色 LUT + 重抽"}
+  - {no: 6,  name: 音画不对齐,      detect: [L1-07],            type: random,     redraw: true,  fix: "配音锚入 + 重抽；必要时后置贴轨"}
+  - {no: 7,  name: 状态不守恒,      detect: [L1-08, W-02],      type: structural, redraw: false, fix: "状态陈述替代 / 拆镜 + 派生图 / 混合合成"}
+  - {no: 8,  name: 接触物理,        detect: [L1-03, W-03],      type: structural, redraw: false, fix: "减少手与接触出现（远景/过肩/只露手腕）/ 混合合成 / 实拍"}
+  - {no: 9,  name: 多步因果链,      detect: [W-04, L1-04],      type: structural, redraw: false, fix: "拆镜 + 剪辑连接；跨段派生图保状态守恒"}
+  - {no: 10, name: 构图偏移,        detect: [P-05, R-05],       type: random,     redraw: true,  fix: "重抽 + 锚定照统一构图 + 闸门③比例校验"}
+  - {no: 11, name: 纹理闪烁,        detect: [L1-10, P-03],      type: random,     redraw: true,  fix: "换 seed 重抽；仍不稳则提步数或改段长"}
+  - {no: 12, name: 手部畸形,        detect: [L1-09, P-01],      type: random,     redraw: true,  fix: "重抽（主力）+ 减少手部特写"}
+  - {no: 13, name: 时长节奏不符,    detect: [L1-03],            type: mixed,      redraw: true,  fix: "段长按动作自然时长（铁律 2）+ 重抽"}
+  - {no: 14, name: 光影方向不自洽,  detect: [W-05],             type: random,     redraw: true,  fix: "重抽 + 锚定照统一光位"}
+  - {no: 15, name: 多余元素,        detect: [R-06],             type: random,     redraw: true,  fix: "重抽；反复出现则检查 prompt 歧义"}
+  - {no: 16, name: 合规崩坏,        detect: [post_checklist],   type: structural, redraw: false, fix: "不成片；后期强制叠加显式+隐式标识 + 文案红线"}
+
+# ---------- 运行时规则 ----------
+runtime:
+  redraw:
+    requires_new_seed: true       # 铁律：同 seed 同 prompt = 逐位相同
+    max_attempts: 3               # N <= 3；p<0.3 时直接改方案
+    on_exhausted: "明确报失败，禁止静默续跑"
+    scope: segment                # 判定落在段，不落整片；通过的段立即冻结
+  structural_failure_paths:       # 结构型的三个出路（重抽不在其中）
+    - 规避（不拍它）
+    - 转嫁（混合合成 / 实拍）
+    - 拆解（拆镜 + 剪辑）
+  single_point_rule: "「选出最好的」!= 「达标」；N 份全不合格必须走失败出口"
+
+# ---------- 待标定参数 ----------
+pending_calibration:
+  params:
+    - tau_face
+    - tau_prod
+    - tau_flow
+    - tau_break
+    - tau_tone
+    - tau_lip
+    - tau_state_window
+    - tau_hand
+    - tau_flicker
+  note: "用历史人工判定样本标定，必须含正负对照；标定集独立于调参样本"

@@ -1,0 +1,369 @@
+{
+  "shot": "C1_棚拍跑步",
+  "video": "raw/C1_run.mp4",
+  "prompt_file": "prompt/C1_run.txt",
+  "judge_model": "doubao-seed-2-1-pro-260628",
+  "ts": "2026-09-18 04:33:10",
+  "items": [
+    {
+      "id": "L0-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.0,
+        "threshold": "n%17==5"
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "resolution",
+        "value": 768.0,
+        "threshold": 768.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.01,
+        "threshold": 73.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": -14.0,
+        "threshold": -50.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": 0.0,
+        "threshold": 1.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 45,
+        "region": "luma",
+        "value": 0.0,
+        "threshold": 0.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-08",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "whole-frame",
+        "value": 5.894,
+        "threshold": 0.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "motion-break",
+        "value": 0.0,
+        "threshold": 3.0
+      },
+      "confidence": "high",
+      "kind": "random",
+      "spikes": 0,
+      "declared_cuts_frames": [],
+      "spikes_at_declared_cuts": 0
+    },
+    {
+      "id": "L1-10",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "frame-alternation",
+        "value": 1.642,
+        "threshold": 0.55
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "product",
+        "value": 3.05,
+        "threshold": 8.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "tone",
+        "value": 0.39,
+        "threshold": 6.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-01",
+      "verdict": "no",
+      "evidence": {
+        "frame": 29,
+        "region": "model's right hand (rear hand, near hip)",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-03",
+      "verdict": "no",
+      "evidence": {
+        "frame": 43,
+        "region": "The lifted sneaker behind the model's raised knee is smeared/mushy, with distorted, unclear texture and shape",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-04",
+      "verdict": "no",
+      "evidence": {
+        "frame": 29,
+        "region": "waist/jeans area of the model",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-05",
+      "verdict": "no",
+      "evidence": {
+        "frame": 58,
+        "region": "left edge of frame, subject's left foot (rear sneaker) is partially cut off by the frame boundary",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-06",
+      "verdict": "no",
+      "evidence": {
+        "frame": 29,
+        "region": "model's lifted leg/foot area",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-01",
+      "verdict": "no",
+      "evidence": {
+        "frame": 14,
+        "region": "The main subject is the young male model, not the sneakers; the sneakers are worn by him and are not the primary main subject of the frames.",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 14,
+        "region": "entire frame",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-03",
+      "verdict": "no",
+      "evidence": {
+        "frame": 14,
+        "region": "The model's pose in frame 1 matches the pose in frame 6, showing a jump cut/loop rather than a continuous running cycle where feet land and push off the floor as described; the model is airborne in multiple frames without a foot landing to push off as stated, and the pose repeats instead of a smooth uninterrupted forward run.",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-04",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-05",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "R-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "W-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "W-03",
+      "verdict": "no",
+      "evidence": {
+        "frame": 43,
+        "region": "The model's left sneaker (the lifted foot) interpenetrates his right standing leg/jeans, with the foot clipping through the denim.",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "W-05",
+      "verdict": "no",
+      "evidence": {
+        "frame": 29,
+        "region": "floor shadow",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "W-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "W-07",
+      "verdict": "no",
+      "evidence": {
+        "frame": 14,
+        "region": "The model's pose is identical to the pose in frame 6, showing the running action loops/returns to the starting pose rather than being a single continuous uninterrupted run, indicating an interrupted/looped action",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high"
+    }
+  ],
+  "aggregate": {
+    "verdict": "REJECT",
+    "l0_no": [],
+    "l1_no": [],
+    "rw_no": [
+      "R-01",
+      "R-03",
+      "W-03",
+      "W-05",
+      "W-07"
+    ],
+    "p_no": [
+      "P-01",
+      "P-03",
+      "P-04",
+      "P-05",
+      "P-06"
+    ],
+    "na_ratio": 0.182,
+    "warnings": [],
+    "reasons": [
+      "R/W 段否决项: R-01, R-03, W-03, W-05, W-07",
+      "P 段 no>=2: P-01, P-03, P-04, P-05, P-06"
+    ],
+    "remedies": []
+  }
+}

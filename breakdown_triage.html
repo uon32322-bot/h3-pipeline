@@ -1,0 +1,109 @@
+<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">H3 带货视频崩坏分诊台：两问判定崩坏类型并给出处理方式</h2>
+<style>
+#bt-root{font-family:var(--font-sans);font-size:13px;line-height:1.6;color:var(--color-text-primary)}
+#bt-root .card{border:0.5px solid var(--color-border-tertiary);border-radius:12px;padding:14px 16px;margin-bottom:12px}
+#bt-root .lbl{font-size:13px;font-weight:500;margin-bottom:8px}
+#bt-root .opt{display:inline-block;border:0.5px solid var(--color-border-secondary);border-radius:8px;padding:6px 14px;margin:0 8px 8px 0;cursor:pointer;font-size:13px;background:var(--color-background-secondary)}
+#bt-root .opt:hover{border-color:var(--color-border-primary)}
+#bt-root .opt.on{border-color:var(--color-border-primary);background:var(--color-background-tertiary);font-weight:500}
+#bt-root .tag{display:inline-block;font-size:12px;padding:2px 8px;border-radius:8px;border:0.5px solid var(--color-border-tertiary);margin-right:6px}
+#bt-root table{width:100%;border-collapse:collapse}
+#bt-root th{text-align:left;font-weight:500;font-size:13px;padding:8px 10px;background:var(--color-background-tertiary)}
+#bt-root td{padding:8px 10px;border-top:0.5px solid var(--color-border-tertiary);font-size:13px;vertical-align:top}
+</style>
+<div id="bt-root">
+  <div class="card">
+    <div class="lbl">第 1 问 · 这次崩坏里，有没有「可验证的物理结果」？（状态守恒 / 接触物理 / 因果链）</div>
+    <span class="opt" onclick="btPick('q1','yes')" id="bt-q1-yes">有</span>
+    <span class="opt" onclick="btPick('q1','no')" id="bt-q1-no">没有</span>
+  </div>
+  <div class="card">
+    <div class="lbl">第 2 问 · 失败的位置，换一个新 seed 会变吗？</div>
+    <span class="opt" onclick="btPick('q2','yes')" id="bt-q2-yes">会变</span>
+    <span class="opt" onclick="btPick('q2','no')" id="bt-q2-no">不会变</span>
+    <span class="opt" onclick="btPick('q2','unknown')" id="bt-q2-unknown">不确定</span>
+  </div>
+  <div class="card" id="bt-result">
+    <div class="lbl" style="color:var(--color-text-secondary);font-weight:400">在上面选两项，这里给出分诊结论。</div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden">
+    <div style="padding:12px 16px;font-weight:500">16 类崩坏速查表</div>
+    <table>
+      <thead><tr><th style="width:6%">#</th><th style="width:24%">崩坏类型</th><th style="width:20%">检测项</th><th style="width:14%">类型</th><th style="width:12%">重抽</th><th>最佳处理</th></tr></thead>
+      <tbody id="bt-tbody"></tbody>
+    </table>
+  </div>
+</div>
+<script>
+var BT_S = {q1:null, q2:null};
+var BT_ROWS = [
+ [1,"身份漂移","L1-01","随机","可","FL2VA 同源编辑链（底图生成一次后派生）+ 换 seed 重抽"],
+ [2,"产品漂移","L1-02 + R-01","混合","可","3 张独立锚定照 + 首尾帧同源派生；有 logo 走混合合成"],
+ [3,"参考不生效","参考敏感度对照","结构","禁","重抽无效：查接线（/history 反查）+ 确认非 T2V 模式"],
+ [4,"短英文文字糊","L1-06 + R-04","部分随机","可","1 中段 + 1 结尾，各 3-5 词；中文/价格/复杂 logo 一律后期叠加"],
+ [5,"接缝色调漂移","L1-05","随机","可","同源派生图 + 统一调色 LUT + 重抽"],
+ [6,"音画不对齐","L1-07","随机","可","配音锚入 + 重抽；必要时后置贴轨"],
+ [7,"状态不守恒","L1-08 + W-02","结构","禁","状态陈述替代 / 拆镜 + 派生图 / 混合合成"],
+ [8,"接触物理","L1-03 + W-03","结构","禁","减少手与接触出现（远景/过肩/只露手腕）/ 混合合成 / 实拍"],
+ [9,"多步因果链","W-04 + L1-04","结构","禁","拆镜 + 剪辑连接；跨段派生图保状态守恒"],
+ [10,"构图偏移","P-05 + R-05","随机","可","重抽 + 锚定照统一构图 + 闸门③比例校验"],
+ [11,"纹理闪烁","L1-10 + P-03","随机","可","换 seed 重抽；仍不稳则提步数或改段长"],
+ [12,"手部畸形","L1-09 + P-01","随机","可","重抽（主力）+ 减少手部特写"],
+ [13,"时长节奏不符","L1-03 曲线","混合","可","段长按动作自然时长（铁律 2）+ 重抽"],
+ [14,"光影方向不自洽","W-05","随机","可","重抽 + 锚定照统一光位"],
+ [15,"多余元素","R-06","随机","可","重抽；反复出现则检查 prompt 歧义"],
+ [16,"合规崩坏","后期检查表","结构（人为）","禁","不成片：后期强制叠加显式+隐式标识 + 文案红线"]
+];
+function btPick(k, v){
+  BT_S[k] = v;
+  ["yes","no","unknown"].forEach(function(x){
+    var el = document.getElementById("bt-"+k+"-"+x);
+    if(el){ el.className = (BT_S[k]===x) ? "opt on" : "opt"; }
+  });
+  btRender();
+}
+function btRender(){
+  var r = document.getElementById("bt-result");
+  var q1 = BT_S.q1, q2 = BT_S.q2;
+  if(!q1 || !q2){
+    r.innerHTML = '<div class="lbl" style="color:var(--color-text-secondary);font-weight:400">在上面选两项，这里给出分诊结论。</div>';
+    return;
+  }
+  var structural = (q1==="yes") || (q2==="no");
+  var html = "";
+  if(q2==="unknown" && q1==="no"){
+    html = '<div class="lbl">结论：先跑一次对照实验，不要直接重抽</div>'
+      + '<div>同 prompt 换一个 seed 跑第二遍，比对两件事：<b>帧差</b>是否远大于噪声基线 1.08、<b>失败位置</b>是否移动。</div>'
+      + '<div style="margin-top:8px">移动 → 判为随机型，之后按重抽处理；不移动 → 判为结构型，走改方案。</div>'
+      + '<div style="margin-top:10px"><span class="tag" style="color:var(--color-text-warning)">成本：1 次生成</span><span class="tag">比盲抽 N 次便宜</span></div>';
+  } else if(structural){
+    html = '<div class="lbl" style="color:var(--color-text-danger)">结论：结构型崩坏 —— 禁止重抽，一次都不许</div>'
+      + '<div>换 seed 会改变画面，但不会改变这类错误的<b>成因</b>：它由画面结构本身决定，重抽 N 次 = 花 N 倍算力拿 N 份同样的错。</div>'
+      + '<div style="margin-top:10px"><b>三个出路（按性价比）：</b></div>'
+      + '<div>① 规避 —— 不拍它：状态陈述替代状态转移，或改用动作白名单内的动作</div>'
+      + '<div>② 转嫁 —— 混合合成：真实照片合成进 H3 环境（拍 2-3 张照片，不用拍视频）</div>'
+      + '<div>③ 拆解 —— 拆镜 + 剪辑：把多步因果拆成每镜一个动作，跨段用派生图保状态守恒</div>'
+      + '<div style="margin-top:10px"><span class="tag" style="color:var(--color-text-danger)">N = 0（不许重抽）</span><span class="tag">回闸门②改方案</span></div>';
+  } else {
+    html = '<div class="lbl" style="color:var(--color-text-success)">结论：随机型崩坏 —— 换新 seed 重抽有效</div>'
+      + '<div>这是判官团的主力场景：失败由本次采样的随机性造成，换 seed 后有机会改变。</div>'
+      + '<div style="margin-top:10px"><b>执行规则：</b></div>'
+      + '<div>每次重抽<b>必须换新 seed</b>（同 seed + 同 prompt = 逐位相同输出，等于空转）</div>'
+      + '<div>落在<b>段</b>级：通过的段立即冻结，绝不整片重跑</div>'
+      + '<div>封顶 <b>N = 3</b>；到顶仍不达标 → 走失败出口，或者这次改方案</div>'
+      + '<div style="margin-top:10px"><span class="tag" style="color:var(--color-text-success)">N &le; 3</span><span class="tag">到顶必须明确报失败</span><span class="tag">禁止静默续跑</span></div>';
+  }
+  r.innerHTML = html;
+}
+(function(){
+  var tb = document.getElementById("bt-tbody");
+  var out = "";
+  for(var i=0;i<BT_ROWS.length;i++){
+    var it = BT_ROWS[i];
+    var color = it[3].indexOf("结构")===0 ? "var(--color-text-danger)" : (it[3]==="混合" ? "var(--color-text-warning)" : "var(--color-text-success)");
+    out += '<tr><td style="color:var(--color-text-tertiary)">'+it[0]+'</td><td style="font-weight:500">'+it[1]+'</td><td style="color:var(--color-text-secondary);font-family:var(--font-mono);font-size:12px">'+it[2]+'</td><td style="color:'+color+'">'+it[3]+'</td><td style="color:'+(it[4]==="禁"?"var(--color-text-danger)":"var(--color-text-success)")+'">'+it[4]+'</td><td style="color:var(--color-text-secondary)">'+it[5]+'</td></tr>';
+  }
+  tb.innerHTML = out;
+})();
+</script>

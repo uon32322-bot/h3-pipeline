@@ -1,0 +1,93 @@
+# ============================================================================
+# H3 带货视频流水线 · 环境冻结清单 (env_manifest)
+# 冻结时间：2026-09-17 23:56:41 CST
+# 冻结依据：部署指南 §2.1 铁律①  换库前不得改动本文件任一字段
+# ============================================================================
+
+## 1. 项目与环境
+PROJECT_ROOT   = /root/autodl-tmp/h3p
+COMFY_DIR      = /root/autodl-tmp/h3p/comfy/ComfyUI
+VENV_PYTHON    = /root/autodl-tmp/h3p/venv/bin/python
+VENV_VERSION   = Python 3.12.3
+
+## 2. 内核版本（ComfyUI）
+COMFYUI_VERSION = 0.36.0
+参照基线（共享实例）= 0.36.0 / d39cdfd
+
+## 3. 运行库版本（决定 kernel 与算子行为）
+torch              2.9.1+cu130
+triton             3.5.1
+torchvision        0.24.1+cu130
+torchaudio         2.9.1+cu130
+transformers       5.16.1
+safetensors        0.8.0
+einops             0.8.2
+numpy              2.3.2
+scipy              1.18.0
+tokenizers         0.23.2
+sentencepiece      0.2.2
+accelerate         1.6.0
+comfy_kitchen      ?
+sqlalchemy         2.0.51
+alembic            1.19.1
+pydantic           2.13.4
+av                 18.0.0
+psutil             7.0.0
+torch.cuda      13.0
+cudnn           91300
+gpu             NVIDIA GeForce RTX 3090
+gpu_arch(SM)    (8, 6)
+
+## 4. 驱动与硬件
+GPU  NVIDIA GeForce RTX 3090, 595.71.05, 24576 MiB
+DRIVER_CUDA     13.2
+HOST_KERNEL     = 5.15.0-136-generic
+OS              = Ubuntu 22.04.5 LTS
+CPU_CORES       = 112
+MEM_TOTAL       = 755 GiB
+
+## 5. 启动参数（加速档 = 由此四项共同定义）
+启动器          = /root/autodl-tmp/h3p/scripts/start_comfyui.sh
+端口            = 6011
+显存模式        = auto
+--base-directory    /root/autodl-tmp/h3p/comfy
+--input-directory   /root/autodl-tmp/h3p/input
+--output-directory  /root/autodl-tmp/h3p/output
+--temp-directory    /root/autodl-tmp/h3p/temp
+--extra-model-paths-config /root/autodl-tmp/h3p/comfy/extra_model_paths.yaml
+--preview-method    none
+加速档位        = T0（官方纯净档：无自定义加速节点）
+  · kitchen INT8 注意力 : 由 comfy_kitchen 提供（零安装收益）
+  · SageAttention       : 未安装（故不启用 --use-sage-attention）
+  · FastH3 4 步         : 未启用（T2 激进档，仅草稿）
+  · 步数                : 8 步 Turbo LoRA（官方）
+  · 分辨率              : 0.98 MP = 1344x768（禁用 1.0MP）
+
+## 6. 权重清单与 sha256（模型独立自持）
+  # H3 项目独立模型清单（物理独立副本 · 零软链 · 不与其他项目共享）
+  # 生成时间: 2026-09-17 23:37:03 CST
+  # 项目根  : /root/autodl-tmp/h3p
+  # 哈希基准: hf-mirror API lfs.sha256（官方权威值）
+  # 获取方式: O_DIRECT 物理复制（源=数据盘官方原版，逐件 sha256 复核通过）
+  #
+  FILE                                                           SIZE         SHA256
+  diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors 20970379616  e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a
+  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors 1956193000   2339acdf19bfe123f46b971ea35d367a84adb85de43627e1eceafa5a5b2b111e
+  text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors     15687142551  35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6
+  vae/minimax_h3_audio_vae_fp32.safetensors                      605254808    8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48
+  vae/minimax_h3_video_vae_fp16.safetensors                      5207808496   7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522
+--- 实际落盘文件与哈希 ---
+  diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors        e889202c41dafb67…
+  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors          2339acdf19bfe123…
+  text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors               35a88d51044231fe…
+  vae/minimax_h3_audio_vae_fp32.safetensors                                8e505d95dd1561d4…
+  vae/minimax_h3_video_vae_fp16.safetensors                                7c1f131492e7edda…
+
+## 7. 存储合规
+  Filesystem      Size  Used Avail Use% Mounted on
+  overlay          30G   13G   18G  41% /
+  /dev/nvme1n1    300G  200G  101G  67% /root/autodl-tmp
+
+# ============================================================================
+# 变更纪律：本文件任一字段变更 ⇒ 种子资产库作废，必须重建
+# ============================================================================

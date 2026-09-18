@@ -1,0 +1,395 @@
+{
+  "shot": "C1v3_跑步_luna_v2",
+  "video": "raw/C1v3_run.mp4",
+  "prompt_file": "prompt/C1_run_v2.txt",
+  "judge_model": "tt-5.6-luna",
+  "ts": "2026-09-18 08:06:56",
+  "items": [
+    {
+      "id": "L0-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.0,
+        "threshold": "n%17==5"
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "resolution",
+        "value": 768.0,
+        "threshold": 768.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 73.01,
+        "threshold": 73.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": -14.0,
+        "threshold": -50.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "audio",
+        "value": 0.0,
+        "threshold": 1.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 44,
+        "region": "luma",
+        "value": 0.0,
+        "threshold": 0.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L0-08",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": 0.0,
+        "threshold": null
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 71,
+        "region": "whole-frame",
+        "value": 2.84,
+        "threshold": 0.5
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "motion-break",
+        "value": 0.0,
+        "threshold": 3.0
+      },
+      "confidence": "high",
+      "kind": "random",
+      "spikes": 0,
+      "declared_cuts_frames": [],
+      "spikes_at_declared_cuts": 0
+    },
+    {
+      "id": "L1-10",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": "frame-alternation",
+        "value": 1.771,
+        "threshold": 0.55
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-11",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 40,
+        "region": "subject-in-frame",
+        "value": 0.125,
+        "threshold": 0.02
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "product",
+        "value": 2.93,
+        "threshold": 8.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "L1-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 0,
+        "region": "tone",
+        "value": 1.71,
+        "threshold": 6.0
+      },
+      "confidence": "high"
+    },
+    {
+      "id": "P-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-04",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "P-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 10,
+        "region": "both feet",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-02",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 13,
+        "region": "plain light grey studio wall and seamless floor surrounding the model",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 14,
+        "region": "full body running stride with both sneakers airborne",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-04",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (na,na,na)"
+    },
+    {
+      "id": "R-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 14,
+        "region": "full frame taller than wide",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "R-08",
+      "verdict": "na",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (na,na,na)"
+    },
+    {
+      "id": "W-01",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "W-03",
+      "verdict": "yes",
+      "evidence": {
+        "frame": 26,
+        "region": "planted shoe on studio floor",
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "2/3 (yes,na,yes)"
+    },
+    {
+      "id": "W-05",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "W-06",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    },
+    {
+      "id": "W-07",
+      "verdict": "yes",
+      "evidence": {
+        "frame": null,
+        "region": null,
+        "value": null,
+        "threshold": null
+      },
+      "confidence": "high",
+      "votes": "3/3 (yes,yes,yes)"
+    }
+  ],
+  "aggregate": {
+    "verdict": "PASS",
+    "l0_no": [],
+    "l1_no": [],
+    "rw_no": [],
+    "p_no": [],
+    "low_conf_no": [],
+    "na_ratio": 0.167,
+    "warnings": [],
+    "reasons": [],
+    "remedies": []
+  }
+}

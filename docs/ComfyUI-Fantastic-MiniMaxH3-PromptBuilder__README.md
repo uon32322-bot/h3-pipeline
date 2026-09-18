@@ -1,0 +1,1186 @@
+# ComfyUI Fantastic H3 Prompt Builder
+
+![version](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2FAdudeguyman%2FComfyUI-Fantastic-MiniMaxH3-PromptBuilder%2Fmain%2Fpyproject.toml&query=%24.project.version&label=version&color=0a6166) ![nodes 2.0](https://img.shields.io/badge/Nodes%202.0-compatible-7ec87e) ![license](https://img.shields.io/badge/license-MIT-blue)
+
+Guided prompt writing and reference-media handling for the open-weight
+**MiniMax H3** video model in ComfyUI.
+
+H3 doesn't want a casual sentence — it wants a structured prompt with named
+sections, shot timings, speaker IDs, and tags pointing at your reference media.
+MiniMax publishes a written guide for that format, and normally a separate
+rewriting model (`H3-Context-IR`) turns your idea into it. That rewriter wasn't
+open-sourced. This node pack is the hand-driven replacement: fillable templates
+for every mode, live checking against the guide's rules, and a media loader that
+keeps your reference tags straight.
+
+![Reference mode workflow](docs/1.png)
+
+*Media Loader → Prompt Builder → MiniMax H3 Reference to Video*
+
+![Keyframe workflow](docs/2.png)
+
+*Media Loader → Prompt Builder → MiniMax H3 Image to Video*
+
+![Splitter workflow](docs/3.png)
+
+*Media Loader → Reference Splitter → processor. For use without the Prompt
+Builder, managing reference media only.*
+
+![Media previews in the editor](docs/6.png)
+
+*Media is displayed while you work. Hover over for previews. Clicking media
+automatically adds the tag (like `<Picture 1>`) into the active text field for
+you.*
+
+Picture thumbnails in the Media Loader carry their pixel size and aspect ratio
+in the corner, repeated in the larger preview when you click one. The ratio is
+named from the same list the resolution selectors use (16:9, 4:3, 9:16, 21:9
+and so on), with `≈` when a reference only comes close — so you can see at a
+glance which preset matches it. Hover the thumbnail for the exact figures.
+
+![Trim and crop editor](docs/7.png)
+
+*Trim and crop clips on the fly without touching the original files, and pull
+any frame straight out of a video into your picture references.*
+
+---
+
+## What's new in 1.6.3
+
+**Fixes:**
+
+- The crop frame now follows the picture when you rotate it. Turning a
+  picture that had an active crop left the marquee stranded in the black
+  area beside the image, wrongly shaped, and it could barely be dragged and
+  never over the picture itself. The overlay is now placed where the image
+  is actually painted rather than where its untransformed box would be.
+- Two fixes from 1.6.1 that 1.6.2 had accidentally dropped are back: a
+  rotated preview no longer paints over the editor's toolbar, and the
+  dialogue row's speaker buttons keep up with the text again.
+
+## What's new in 1.6.2
+
+**Security release.** This version exists to address findings from the Comfy
+Registry's security review of earlier versions. No features changed; if you
+run any earlier version, update.
+
+- **Path containment.** Every file path a request supplies is now resolved
+  and verified (via `realpath`) to live inside ComfyUI's input, output or
+  temp directory before it is read, and the fallback that could previously
+  rewrite a rejected path into an unconfined one is gone. Symlink escapes
+  are caught by the same check.
+- **Cross-site request protection.** Every `POST` route now refuses requests
+  that a browser marks as coming from another site (`Sec-Fetch-Site:
+  cross-site`, or an `Origin` that doesn't match the host), independently of
+  ComfyUI core's middleware — which matters on `--listen` installs, where
+  core's Host/Origin comparison doesn't apply. A malicious web page you
+  happen to visit can no longer call this pack's upload, delete or write
+  endpoints.
+- **JSON routes require `Content-Type: application/json`.** Cross-origin
+  pages cannot send that content type without a CORS preflight, which is
+  never approved, so the JSON endpoints stop being reachable as "simple
+  requests". *If you script these endpoints yourself, add the header* — a
+  `text/plain` body now gets a 415.
+- **Deletion is double-checked.** The prompt/preset delete and rename paths
+  re-verify, immediately beside the `os.remove`, that the target file lives
+  inside its own library directory.
+- **`POST /minimax_h3/probe` removed.** Nothing in the pack called it, and
+  an uncalled endpoint that accepts an arbitrary path is pure attack
+  surface. Media metadata comes from the upload and extract responses and
+  from `presets/load`, as before.
+- **No more shelling out to ffmpeg.** All video and audio decoding now goes
+  through PyAV in-process (ComfyUI core requires PyAV, so every working
+  install has it). The ffmpeg/ffprobe fallback paths are gone: they were the
+  cause of the registry scanner's command-injection flags (list-argument
+  calls that were never actually injectable, but the cleanest answer is no
+  external processes at all), and they were also the pack's only dependency
+  on a binary being on PATH. If you previously relied on ffmpeg because PyAV
+  was broken in your environment, see Troubleshooting — a broken PyAV also
+  breaks ComfyUI itself, so it's worth fixing either way.
+
+## What's new in 1.6.1
+
+**Prompts can be linked to a media preset.** A prompt is written for a
+particular set of references, so saving one can remember which. If your
+current media already matches a saved preset it offers to link it; if it
+doesn't, it offers to save it as a preset and link it in the same action.
+Which case applies is decided by comparing the media itself, not by the label
+on the preset picker — that label survives every edit short of *Unload*, so it
+can name a preset your media stopped matching an hour ago. Loading a linked
+prompt never swaps your media silently: a strip names the preset, its
+reference count and how many it would replace, and warns you if the preset has
+been edited since it was linked, because reference numbers are positional and
+`<Picture 3>` may no longer mean the picture you wrote it for. Linked prompts
+carry a badge in the library showing what the preset holds, with a hover
+preview of its contents. In draft mode the media goes to the draft's own set,
+never to the node. See
+[Linking a prompt to its media](#linking-a-prompt-to-its-media).
+
+**Media presets can be categorised.** The picker now has the same bar the
+prompt library does — a search box, a category dropdown and a ✎ to rename or
+clear a category — above a list grouped by category with uncategorised sets
+last. File a preset when you save it, or from the ✎ on its row in the picker,
+which changes only the label and never touches the media. Preset names stay
+unique across every category, because a prompt links to a preset by name.
+
+**Closing can save instead of asking.** A new ⚙ setting, *Save to node when
+closing*, makes ✕, Escape and clicking outside give the node your changes.
+Cancel still discards, and a draft is never written to the node by closing.
+While it's on, the unsaved-changes warning greys out, since it has nothing
+left to warn about.
+
+**The bundled guide is now HTML rather than a PDF** — it opens in a tab,
+searches with Ctrl+F, has a contents sidebar and deep links, and reads
+properly on a phone.
+
+**Fixes:**
+
+- Rotating a picture or clip in the crop editor no longer paints outside the
+  window. A quarter turn used to spill over the toolbar and cover the rotate
+  button itself, so the turn couldn't be undone.
+- The dialogue row's speaker buttons now keep up with your text. Inserting a
+  line for (S1) offers (S2) next, as it always should have — the row was only
+  rebuilt when something else redrew the editor.
+- Escape now respects your preferences. It used to close the editor directly,
+  discarding unsaved edits even with *Warn about unsaved changes* switched
+  on — which is the opposite of what that setting says.
+- A draft no longer loses its edits when you switch back to Live and then
+  close the editor.
+- A draft that never had media of its own no longer reverts your Media Loader
+  when it's committed. Media a draft merely displays is now kept separate from
+  media it owns, so only a set you deliberately edited is applied.
+- A draft started while the Media Loader was empty now follows the node's
+  media instead of showing none for ever, and committing it can't clear your
+  loader.
+- Media stored in a draft is checked when it loads; anything unusable is
+  discarded and the banner says how many, rather than a broken reference
+  reaching a generation.
+- The preset picker no longer reports a freshly loaded preset as edited. It
+  compares effective values now, so a preset whose stored form predates a
+  field still matches itself after loading.
+- A preset containing a switched-off item can be recognised again; the
+  comparison was ignoring disabled items on one side only.
+- The draft banner stays pinned above the editor body instead of scrolling
+  away, and survives a failure elsewhere in the form — it's the one thing that
+  tells you the node isn't holding what you're looking at.
+- The ⚙ menu can discard every saved draft, and shows how many there are.
+
+---
+
+## What's new in 1.6.0
+
+**Draft mode.** Queue a batch, then start writing the next prompt on a
+scratchpad the node can't execute. Drafts autosave to disk, survive a browser
+crash, reopen where you left off, and can carry their own reference set.
+**⇣ Pull from Live** copies the current prompt across — cast and setup only,
+or everything — so a follow-up shot doesn't mean re-typing your subjects.
+See [Draft mode](#draft-mode).
+
+**The media loader opens inside the editor.** A **▣ Media** button in the
+editor header brings up the loader's own panel over the top, so adding a
+reference mid-sentence doesn't mean finding the node on the canvas.
+
+**Fixes:**
+
+- Saving a prompt under a new name no longer deletes the one you loaded.
+  Renaming is now its own clearly-labelled action, and a name collision asks
+  before overwriting instead of replacing silently.
+- The library's category filter no longer sticks to a category that no longer
+  exists, which made a full library look empty.
+- The Media Loader's preset dropdown stayed open reliably; it was a native
+  `<select>` inside the node, which the ComfyUI frontend closes on every
+  canvas redraw.
+- Presets saved before dimensions were stored now come back with their aspect
+  data, and no longer cause a burst of redraws that made the browser sluggish.
+- The node and text size you set are re-applied when a workflow loads, instead
+  of the panel reverting to 100% inside a correctly-sized node.
+- Fixed caret drift in the highlighted text fields: the `[Shot N]` marker was
+  drawn bold, and the extra glyph width pushed the caret out of step with the
+  text underneath.
+- All prompt and preset writes are atomic, so a crash mid-save can't corrupt
+  an entry.
+
+---
+
+## Contents
+
+- [What you get](#what-you-get)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Writing a prompt](#writing-a-prompt)
+- [Prompt library](#prompt-library)
+- [Draft mode](#draft-mode)
+- [Reference mode](#reference-mode)
+- [FAQ: wiring reference media](#faq-wiring-reference-media)
+- [Dated output folders](#dated-output-folders)
+- [Troubleshooting](#troubleshooting)
+- [Credits](#credits)
+- [License](#license)
+
+---
+
+## What you get
+
+Four nodes, all under **conditioning → video_models**:
+
+| Node | What it's for |
+|---|---|
+| **Fantastic H3 Prompt Builder** | The main one. An editor with fillable fields for every prompt mode, checks your work as you type, and outputs the finished prompt. |
+| **Fantastic H3 Media Loader** | Drag-and-drop your reference images, videos, and audio. Shows exactly which tag each one will get. |
+| **Fantastic H3 Reference Splitter** | Optional. Fans media out into individual slots when you want it to skip the Prompt Builder. |
+| **Fantastic H3 Filename Prefix** | Optional. Builds a save prefix with the date already filled in, for dated output folders. |
+
+Highlights:
+
+- **Templates for all five modes** — text-to-video, first frame, first+last
+  frame, last frame, and full reference mode.
+- **Click-to-insert tags.** Your reference media appears as thumbnails; click
+  one to drop `<Picture 2>` into your text. No typing tags by hand.
+- **Live checking.** Shot numbering, cut times, dialogue formatting, references
+  you connected but never mentioned — flagged while you write, not after a
+  failed render.
+- **The official guide is built in.** A 📖 button opens the full guide in a new tab — searchable, linkable, and readable on a phone.
+- **Your work isn't lost by a stray click.** Closing with unsaved changes asks
+  first — **Save to node**, **Discard**, or **Keep editing**. Only *Save to
+  node* changes what the node sends. If you'd rather work the other way round,
+  ⚙ → *Save to node when closing* makes ✕, Escape and clicking outside hand
+  your changes to the node instead of asking; Cancel still discards, and a
+  draft is never written to the node by closing. The ⚙ menu can also turn off
+  click-outside-to-close, or the warning itself.
+- **Reference tags read as chips** in the text, colour-coded by kind (⚙ has a
+  toggle for plain text fields, which keeps the hover previews), with the
+  thumbnail on hover — no side panel opening and shifting the layout. Hovering
+  a `<Subject N>` shows the first picture its definition cites, the media it
+  references, its speaker ID, and any `<Audio N>` attached to it — including
+  voice references declared the other way round, in the audio's own line. Tags
+  with nothing behind them show red as you type.
+- **A dialogue row** with a language picker and one button per speaker already
+  in the prompt, plus the next unused ID — and a voiceover toggle that writes
+  the guide's exact phrasing including the lips-closed clause.
+- **Cut markers are chipped too** — `[Shot 2] at 00:03.000` reads as one unit,
+  in a neutral slate, so the structure of a multi-shot prompt is scannable.
+- **Spoken lines are shaded** — `<d>…</d>` blocks get a blue band matching the
+  speaker chips, with the markers dimmed and the language tag picked out, so you can see at a glance
+  what the model will actually say and catch delivery notes that drifted
+  inside the tags. Speaker IDs like `(S1)` are chipped too.
+- **Drag-and-drop media** with previews, playback, and reorderable slots.
+- **Non-destructive trim and crop** — a popout editor sends just a slice of a
+  clip (like its last 3 seconds), or just a region of the frame, without
+  touching the file.
+- **A prompt library** — save prompts with categories and favourites, then
+  search and reload them.
+- **Draft mode** — park the prompt that's queued and start the next one on a
+  disk-backed scratchpad, with its own reference set, that can't be executed
+  until you commit it.
+- **The media loader opens inside the editor** — no hunting for the node on
+  the canvas to add a reference mid-sentence.
+- **Media presets** so you can reload a set of references in one click.
+- **Unload media** clears the node in one go (after a confirmation) without
+  deleting the underlying files, so presets pointing at them still work.
+- **Size control** — ⤢ Size sets the node's scale (100–300%) and its text size
+  (100–200%) independently, by slider or by typing the number. Changes apply when you press **Apply**, not while you drag, because
+  resizing the node would pull the slider out from under the pointer. Both are remembered for you
+  rather than for the workflow, so a node dropped into a new graph starts at
+  the size you actually work at. The prompt editor has the same two sliders in
+  its ⚙ menu, which is what you want on a 4K monitor.
+- **Detail control for reference video** — decode big clips at a smaller size
+  so a long 4K reference doesn't eat gigabytes of RAM.
+
+---
+
+## Requirements
+
+- **ComfyUI 0.30.0 or newer** — this is when H3 support landed.
+- **The MiniMax H3 models.** Use the `fl2va` checkpoint for text and keyframe
+  work, `ref2va` for reference mode. ComfyUI's own H3 templates will set you up.
+- **PyAV** — used for video and audio decoding. ComfyUI itself requires PyAV,
+  so every working install already has it; the node checks at startup and
+  tells you if videos are unavailable rather than failing when you hit queue.
+  Since 1.6.2 the pack never shells out to ffmpeg — decoding is all in-process
+  through PyAV.
+
+---
+
+## Install
+
+**Via git**
+
+```bash
+cd ComfyUI/custom_nodes
+git clone https://github.com/Adudeguyman/ComfyUI-Fantastic-MiniMaxH3-PromptBuilder
+```
+
+**Via ComfyUI Manager** — search for "Fantastic H3 Prompt Builder" and install.
+
+**Manually** — download the ZIP and extract into `ComfyUI/custom_nodes/` so you
+end up with `ComfyUI/custom_nodes/ComfyUI-Fantastic-MiniMaxH3-PromptBuilder/`.
+
+Then **restart ComfyUI completely** — not just a browser refresh. Nodes are only
+registered at startup.
+
+To confirm it worked, search the node menu for "MiniMax H3". All three nodes
+above should be listed.
+
+---
+
+## Quick start
+
+This is the same for every mode:
+
+1. Add a **Fantastic H3 Prompt Builder**.
+2. Click **Edit prompt…**, pick your mode along the top, and fill in the fields.
+   The finished prompt builds live in the right-hand panel.
+3. Click **Save to node**.
+4. Connect the Prompt Builder's `prompt` output to the `prompt` input on
+   whichever H3 node you're using:
+   - **MiniMax H3 Image to Video** for T2VA, I2VA, FL2VA, and L2VA
+   - **MiniMax H3 Reference to Video** for reference mode
+
+   If `prompt` shows as a widget rather than an input, right-click it and choose
+   *Convert widget to input*.
+5. Set `width`, `height`, and `length` on that node. For first/last-frame modes
+   the editor shows the exact frame count to use — H3 only accepts certain
+   values, and the editor already rounds to a valid one.
+6. Wire up whatever your mode needs:
+   - **T2VA** — nothing else; the prompt is the whole input.
+   - **I2VA / FL2VA / L2VA** — load your keyframe images with either ComfyUI's
+     own **Load Image** nodes or this pack's **Media Loader**, then connect them
+     to **Image to Video** like so:
+     - **I2VA** — your image → `first_frame`
+     - **FL2VA** — first image → `first_frame`, second image → `last_frame`
+     - **L2VA** — your image → `last_frame`
+
+     With **Load Image** nodes you have a choice: wire them straight into the
+     H3 node, or route them through the Prompt Builder first — into its
+     `picture_1` input and back out of the matching output. You can also do
+     both, by splitting the connection so the same image reaches the H3 node and
+     the builder. Routing through the builder is what gives you previews while
+     you write.
+
+     The **Media Loader** does the same job with less wiring: drop your images
+     on it, run its single `references` output into the Prompt Builder, and take
+     the frames from the builder's `picture_1` and `picture_2` outputs.
+   - **Reference mode** — see [Reference mode](#reference-mode) below.
+7. Queue it.
+
+The rest of the workflow — loaders, samplers, VAE decode, save — is unchanged
+from ComfyUI's built-in MiniMax H3 templates. This pack only replaces how the
+prompt gets written.
+
+---
+
+## Writing a prompt
+
+Click **Edit prompt…** to open the editor, then pick a mode along the top:
+
+| Mode | You give it | Good for |
+|---|---|---|
+| **T2VA** | Just text | Building a scene from scratch |
+| **I2VA** | A first frame | Animating forward from an image |
+| **FL2VA** | First and last frames | Getting from A to B |
+| **L2VA** | A last frame | Working backwards to a known ending |
+| **Reference** | Any mix of images, video, audio | Locking a character, style, voice, or motion |
+
+The editor fills in the fixed boilerplate — instruction lines, timing values,
+section headers — so you write the actual description and it assembles a
+correctly formatted prompt underneath. The right-hand panel shows the finished
+prompt live as you type.
+
+**Things the toolbar does for you:** inserts numbered shots with correctly
+formatted cut times, writes camera moves as proper sentences, wraps dialogue
+with the right language tags and speaker IDs, and drops in reference tags.
+
+**Things it checks:** shots numbered in order, cut times increasing and inside
+your video's length, `[Shot 1]` not carrying a timestamp, dialogue tags balanced
+and labelled, references you connected but never mentioned, and — in reference
+mode — every subject having a matching retention entry.
+
+Amber warnings are advisory and the prompt saves regardless. Red errors are the
+ones worth fixing before you render.
+
+**Clear** in the header empties every field and starts a new prompt in the same
+mode. It asks first, and the node keeps whatever prompt it already has until you
+save — so clearing is only permanent once you press **Save to node**.
+
+![I2VA editor layout](docs/4.png)
+
+*I2VA layout — only the input Picture 1 can be used in I2VA mode. Other media is
+disabled. You can rearrange which image is used as Picture 1 on the Media Loader
+node: click and drag the ☰ icon. Alternatively, media can be disabled and
+enabled by clicking the green dial, which automatically reorders the media
+passed to the processing node. NOTE: changing order or disabling media changes
+its label for the prompt — it does **not** automatically update your prompt.*
+
+---
+
+## Prompt library
+
+Click **☰ Library** in the editor header to browse everything you've saved.
+
+**Save current prompt** stores what's in the editor under a name, with an
+optional category. Saved prompts keep the *editor state*, not just the finished
+text — so loading one puts every field back exactly as you left it, ready to
+edit. Nothing is re-parsed, so nothing can be misread on the way back in.
+
+In the library you can:
+
+- **Search** by name, category, mode, or the prompt text itself.
+- **Filter by category** — type any category name when saving and it becomes
+  available in the dropdown.
+- **Manage categories** — pick one in the dropdown and click ✎ to rename it
+  across every prompt in it, or clear it so those prompts become uncategorised.
+  The prompts themselves are never deleted.
+- **Recategorise a single prompt** — click its category chip (or `+ category` on
+  one without) and set a new one.
+- **Star favourites**, which sort to the top of the list.
+- **Load** a prompt, replacing what's in the editor (it asks first if you'd be
+  overwriting something).
+- **Delete** entries you don't need.
+
+Each row shows the mode it was written for, its category, how long ago it was
+saved, and the opening of the prompt.
+
+Saving again under the same name updates the entry in place. Saving under a
+**different** name after loading one is your call, made explicitly: **Save as
+new** (the default, also what Enter does) keeps the original and adds a second
+prompt, while **Rename "…"** carries the loaded prompt over to the new name and
+keeps no second copy. Earlier versions treated every changed name as a rename,
+which silently deleted the prompt you'd loaded — that is what made saved
+prompts go missing. If a new save collides with a name that already exists,
+nothing is overwritten until you confirm it inline.
+
+Prompts live as individual JSON files in your ComfyUI user directory, so they
+survive updates and are easy to back up or share. Writes go through a temporary
+file, so a crash mid-save can't corrupt an entry.
+
+The editor's **▣ Media** button opens the connected Media Loader's own panel
+in an overlay on top of the editor — the same panel the node hosts, so
+everything works the same way. Escape closes the loader and leaves the editor
+open. Reference tags refresh when you close it, so adding or reordering media
+renumbers `<Picture N>` immediately.
+
+In draft mode that button opens the **draft's own** reference set instead,
+marked teal like the rest of draft mode. Editing it never touches the Media
+Loader node: the draft keeps its own media until you commit. Which set you
+are editing is decided by where you clicked — the node's own panel and its
+"Open loader…" button are always Live, and ▣ Media while drafting is always
+the draft.
+
+### Linking a prompt to its media
+
+A prompt is usually written for a particular set of references, so the save
+form offers to remember which. What it offers depends on your current media:
+
+- **Linked to media — *name*** — your media is already saved as that preset,
+  so ticking the box is all it takes.
+- **Link to media — new preset** — your media isn't saved as a preset yet.
+  Tick the box, give it a name, and it's saved and linked in one go.
+
+The match is decided by comparing the media itself, not by the label on the
+preset picker: that label survives every edit short of **Unload media**, so it
+can name a preset your media stopped matching a while ago. When it has, the
+picker now shows it as *name (edited)*.
+
+Linked prompts carry a badge in the library showing what the preset holds —
+a small icon and count per kind, then the preset name — counted live from the preset itself, so it stays
+right even if you edit the preset afterwards, so you can
+tell at a glance which prompts bring media with them. Hover it for a preview
+of what's in that preset — thumbnails, a count by kind, and a note if any of
+its files have gone missing.
+
+Loading a linked prompt never changes your media silently. A strip appears
+naming the preset, how many references it holds and how many it would
+replace, with **Load the media too** or **Prompt only**. If the preset has
+been edited since it was linked, the strip warns you — reference numbers are
+positional, so `<Picture 3>` in the prompt may no longer mean the picture it
+did when you wrote it. A preset that has since been deleted doesn't block the
+prompt; you're just told it's gone.
+
+In draft mode the media goes to the draft's own set, never to the Media
+Loader node.
+
+---
+
+## Draft mode
+
+Queue some generations, then start on your *next* prompt without touching the
+one that's running: the **Draft ▶** button in the editor header switches to a
+scratchpad. The modal turns teal, the fields cool, and a banner states the
+deal plainly — the node still holds the Live prompt, and nothing in the draft
+is queued or executed until you commit it.
+
+The draft autosaves to disk as you type (its own file, in its own directory —
+it can never appear in, or interfere with, your prompt library or presets), so
+a browser crash costs at most a second or two. Closing the editor from draft
+mode reopens it in draft mode. Your Live session edits are held while you
+draft and restored when you switch back — nothing is written to the node by
+switching.
+
+A draft's media is in one of three states, and the banner always says which:
+
+- **Following the node's media** — the usual case. The draft shows whatever
+  the Media Loader holds.
+- **Showing media as of when the draft started** — if the loader held
+  references when you began, the draft remembers them so its `<Picture N>`
+  tags keep meaning the same files. Reference numbers are positional, so
+  without this, rearranging the loader would silently retarget the tags in
+  your draft. This is display only.
+- **Has its own media** — you edited the draft's reference set through
+  ▣ Media. Only this state is applied to the Media Loader when you commit.
+
+The distinction matters: a draft you never edited media in will never change
+your Media Loader on commit, so improving your Live references while a draft
+sits open is safe.
+
+Because a draft's media is the one thing that can reach the Media Loader
+without having been uploaded through it, it's checked when the draft loads.
+Anything unusable — a missing file, an unrecognised type — is discarded, and
+the banner says how many, rather than letting a broken reference through to a
+generation. Unrecognised fields are left alone, so a draft written by a newer
+version isn't damaged by an older one.
+
+**Save to node** is greyed out while you're drafting — nothing in a draft can
+reach the node except through Commit — and the ⚙ menu's other controls carry
+on working as usual.
+
+**⇣ Pull from Live** copies the Live prompt into the draft, which saves
+re-typing a cast you've already written. It offers two scopes: *Cast and
+setup only* keeps the mode, duration, subject definitions, style and
+retention markers but leaves the description fields empty — the shape of
+writing the next shot in a scene — while *Everything* is a straight copy for
+working up a variant. Live is not changed either way.
+
+**Commit to Live** overwrites the node's prompt with the draft and applies the
+draft's media snapshot to the loader. If the Live prompt has work that isn't
+in the library, you're offered the chance to save it there first — inline,
+with the same collision protection as any library save. Committing consumes
+the draft. **Clear draft** throws the scratchpad away and starts a blank one.
+
+The draft banner stays pinned above the editor body rather than scrolling with
+the fields, so it still answers "am I editing Live?" when you're deep in the
+description. The ⚙ menu shows how many drafts exist across all your workflows
+and can discard them all at once.
+
+You can also save a draft straight to the library at any point without
+committing it — the banner then tracks whether the draft still matches what
+you saved. Drafts are per prompt-builder node, capped at the 25 most recently
+touched across all workflows; older ones age out on their own.
+
+---
+
+## Reference mode
+
+Reference mode is the one that takes media — images, video, and audio you want
+the model to draw a character, style, voice, or motion from. It uses **MiniMax
+H3 Reference to Video** and the `ref2va` checkpoint.
+
+### The short version
+
+1. On the Prompt Builder, click **+ Media loader**. A Media Loader appears,
+   already connected.
+2. Drop your reference files onto it, or click **Load files…**. Images, video,
+   and audio can all go in at once — each lands in the right group.
+3. Open **Edit prompt…** and switch to **Reference** mode. Your media now shows
+   up as clickable thumbnails; click one to insert its tag into your text.
+4. Fill in the six sections, then **Save to node**.
+5. Connect the Prompt Builder's media outputs — `picture_1`, `video_1`, and so
+   on — to the matching slots on **MiniMax H3 Reference to Video**, alongside
+   the `prompt` connection you already made.
+
+### What the media loader shows you
+
+Every reference gets a tag like `<Picture 1>` or `<Audio 2>`, and your prompt
+refers to media by those tags. The numbering isn't simply "which slot did I plug
+this into" — see [How do tags get their
+numbers?](#how-do-tags-get-their-numbers) — so the loader displays the exact tag
+order along the bottom of the node, and the editor labels each thumbnail with
+the tag it will actually get.
+
+The ✂ button on any video or audio row trims what's sent to a start–end range
+in seconds — the file itself is untouched, and the counters and 15-second
+budgets track the trimmed span. `last 2s` / `last 3s` shortcuts grab a clip's
+tail in one click, which is exactly what video continuation wants. Over-long
+clips can be brought inside the budget the same way instead of re-exporting.
+
+Videos that carry sound get an extra control for whether that soundtrack is
+treated as part of the video or as a separate audio reference. The **?** button
+by the videos heading explains the choice, and there's a
+[summary in the FAQ](#what-do-off--paired--alone-do).
+
+### Video size and memory
+
+Reference video is decoded to raw float frames, so memory is
+`width x height x 3 x 4 bytes x frames` — a 15-second 1080p clip is about 9 GB,
+and three of those will hurt.
+
+**Nothing is resized unless you ask.** A clip is decoded at its own resolution
+until you set a **size** in its ✂ editor, which caps the long edge while
+decoding so full-size frames are never built:
+
+| Cap on a 15s 1080p clip | Memory |
+|---|---|
+| full *(default)* | ~9.0 GB |
+| 1280 px | ~4.0 GB |
+| 1024 px | ~2.5 GB |
+| 832 px | ~1.7 GB |
+
+It costs less quality than you'd expect, because the native H3 node rescales
+every reference to your generation's pixel area regardless — feeding it 1080p
+while generating at 832x480 spends the memory and then throws the detail away.
+Clips already smaller than the cap are left alone.
+
+Two cases where you should leave it at full: a video used as a **motion-context
+continuation source**, and any clip whose framing you're matching closely —
+both want to be at least as large as your generation.
+
+Trimming helps too, and multiplies with this: size and duration are
+independent factors.
+
+### Picture roles
+
+Start a definition line with `<Picture N>` and role chips appear under it, the
+same way audio lines work. Each one writes the definition, sets the matching
+retention marker and context, and adds the right summary task type:
+
+| Chip | Marker | Task type |
+|---|---|---|
+| First frame | `fully_preserved` | keyframe completion |
+| Last frame | `fully_preserved` | keyframe completion |
+| Composition | `weak_reference` | reference generation |
+| Look / style | `weak_reference` | reference generation |
+| Setting | `partially_preserved` | reference generation |
+| Attribute → subject | `attribute_transfer` | reference generation |
+| Storyboard | `weak_reference` | reference generation |
+
+There's deliberately no "identity" chip: a picture that simply shows what a
+character looks like belongs cited *inside* that subject's line
+(`<Subject 1> is the woman in <Picture 1>, with ...`), not as a standalone
+`<Picture N>` definition. Standalone picture lines are for pictures playing a
+role in their own right.
+
+Note that `attribute transfer` is a retention marker, not a task type — the
+chip sets `attribute_transfer` on the retention row while the summary stays
+`reference generation`.
+
+### Phrases
+
+Bits of wording you write over and over — a house style line, a camera move you
+like, a soundscape you always start from — can be saved once and inserted with
+a click. The **Phrases** row sits under the dialogue controls:
+
+- **+ New** opens a small window to compose the phrase — prefilled if you had
+  text selected, empty and ready to type if not — with a name and an optional
+  category. Ctrl+Enter saves, Esc closes.
+- **Right-click a selection** in any field for *Save selection as phrase…*,
+  which opens the same window with the text already in it.
+- The two dropdowns filter by category and pick the phrase; hovering the
+  phrase picker shows the whole wording, since the list only has room for the
+  name.
+- **+ Phrase** drops it in at the caret, on the same line — line breaks in a
+  saved phrase are flattened, because the model reads them as shot cuts.
+- **Delete** removes the selected one.
+
+Phrases are stored with ComfyUI rather than in the workflow, so they follow the
+install and are shared by every prompt you write. They're plain text — for
+saving a whole prompt, use the [prompt library](#prompt-library) instead.
+
+### Switching lines off
+
+Every line in `subject_definitions` and every row in `retention_analysis` has
+its own ◉ switch. Click it and the line greys out and **drops out of the
+generated prompt**, while staying exactly where it is in the editor.
+
+That's for the in-between moments: you pull a reference out of the loader to
+try something, and the lines describing it would now be pointing at media
+that isn't there. Switch those two lines off, run the test, switch them back
+on — no deleting and retyping.
+
+The checks follow suit: a switched-off definition doesn't count as defined, so
+you won't be told a subject is missing its retention entry when both of its
+lines are off together.
+
+Whole sections have the same switch on their heading — `subject_definitions`,
+`retention_analysis`, `overall_soundscape` and `non_diegetic_music` — for when
+you want the lot gone at once. `summary` and the description can't be switched
+off; without them there's no prompt.
+
+All of it saves with the workflow and with prompt presets.
+
+### Trimming and cropping clips
+
+The ✂ button on any video or audio row opens a popout editor. **The file on
+disk is never modified** — everything is applied when the clip is decoded, so
+the same file can be treated differently in another workflow, and Reset gives
+you the whole clip back.
+
+Video previews play with sound (🔊 mutes them), so you can trim on what you
+hear as well as what you see. For both video and audio you get a timeline:
+**click or drag anywhere on the bar to scrub** the preview, and drag the two blue handles to set what's kept —
+clicking the bar never moves them. The preview follows whichever handle you're
+dragging, so you can find a cut by eye. An amber playhead shows where the preview is, with its exact time
+below the bar; if you scrub outside the kept range it turns red and says so, so
+a frame you're looking at is never quietly excluded from the output. **◀| |▶** step a frame; **⇤ start** and **end ⇥** snap the range
+to wherever the playhead sits — scrub to a cut, then click. **⏮ First** and
+**Last ⏭** jump the playhead to the clip's own first or last frame, which pairs
+with 📷 for grabbing a continuation frame. Or use the
+keyboard:
+
+| Key | Does |
+|---|---|
+| ← → | Step one frame (hold shift for ten) |
+| space | Play / pause the selected span |
+| `[` `]` | Set start / end to where the playhead is |
+| home / end | Jump to the start / end of the selection |
+| M | Mute / unmute the preview |
+| A | Save the kept range as an audio reference |
+| C | Capture the current frame (video only) |
+| esc | Close without applying |
+
+ Audio shows its waveform under the ruler. Play loops just the
+selected span, and the readout warns when the kept span drops under the model's
+2-second minimum.
+
+Video also gets **📷 Use frame**, which grabs the frame currently shown in the
+preview, saves it into ComfyUI's input folder, and adds it to the node as a
+picture reference. That's the easy way to continue from a clip's ending: scrub
+to the frame you want (the very last frame is often the blurriest, so pick a
+good one a little earlier), capture it, and wire that picture to `first_frame`
+on **MiniMax H3 Image to Video** in I2VA mode. If a crop is active the still is
+cropped to match.
+
+If all 12 references are already in use, the frame is still captured — it just
+arrives **switched off**, with a message saying so. Free a slot (a video's
+soundtrack counts as one, so setting it to `off` is often the easiest) and
+switch the picture on with ◉. Capture is only refused outright when all nine
+picture slots are taken, since there'd be nowhere to put it.
+
+**🎵 Use audio** does the same for sound: it writes the kept range out as its
+own WAV in ComfyUI's input folder and adds it as a standalone audio reference.
+That's how you lift a voice sample out of a longer clip — trim to the sentence
+you want, click, and it appears in the audio slots ready to define as
+`<Audio N>`. It's offered for standalone audio too, so you can cut a long
+recording down to a reference-sized piece without leaving ComfyUI. The
+extraction runs server-side through the same decoder the loader uses, and is
+refused if the audio slots are full or the range is under the 2-second
+minimum.
+
+![Capturing a frame in the trim editor](docs/7.png)
+
+![The captured frame in the picture pool](docs/8.png)
+
+*Capture the frame you're looking at, and it lands in the picture pool like any
+other reference — tagged, taggable, and saved with presets.*
+
+**Pictures get the same treatment.** The ▣ button on a picture tile opens the
+editor with the rotate, crop and mirror tools — no timeline, since there's nothing
+to trim. The **size** dropdown caps the long edge of what's actually sent. Videos have
+the same control in their ✂ editor, where it matters more — a cap saves that
+memory on *every frame*, so a 15-second clip capped at 1280 px costs a fraction
+of the same clip at 4K. Both default to full — media is only resized when you
+set a size. A 4K photo is
+decoded and rescaled on *every* generation, which costs real time and memory —
+and the native H3 node downsizes references to your generation's pixel area
+anyway, so the detail is discarded regardless. Capping a 4K reference at
+1280 px cuts its decoded tensor from about 100 MB to 11 MB. The reported size
+updates live, and it never upscales: a picture already under the cap is left
+alone.
+
+The cap only affects what's decoded — the file in ComfyUI's input folder stays
+full size, and every run pays to decode it. **⬇ Write copy** does the permanent
+version: it writes a resized copy (with the current crop, rotation and mirror
+baked in) into the input folder and points the reference at it, so the file, the
+decode and the tensor all shrink. Your original file is left exactly as it was;
+the copy is a new entry. A 4K PNG capped at 1280 px goes from about 25 MB to
+2.4 MB.
+
+One exception worth respecting: a picture used as `first_frame` or `last_frame`
+should stay **at least as large as your generation**, or the model will be
+upscaling it back and you'll see the softness.
+
+**↻ Rotate** turns the picture 90° clockwise per click (shift-click goes
+anticlockwise), for phone photos that came in sideways. The crop rect turns
+with the picture, so a region you framed stays on the same part of the image,
+and the reported size swaps to match. Back on the tile, the kept region is
+outlined and everything outside
+it is dimmed, so you can see what was dropped as well as what's left, and the
+corner badge switches to the **cropped** pixel size and ratio. Mirrored
+pictures show flipped. Crop a subject out of a wider shot, or flip a reference, without
+touching the file: the rect is stored on the item and applied when the image is
+decoded, and PIL crops before the float conversion, so a small crop of a huge
+photo costs a fraction of the memory the whole frame would.
+
+Video also gets **⇄ Mirror**, which flips the clip left-to-right before it's
+sent. The preview flips with it, and so does the row thumbnail, so you always
+see what the model will get. Worth knowing what mirroring does to a reference:
+any text in frame becomes reversed, and asymmetric details swap sides — a
+parting, a scar, which hand holds something, which way a subject faces. That
+makes it useful for getting a pose or composition facing the other way, and a
+poor idea for identity references you're keeping consistent across a chain,
+where the flipped side-details will fight your unmirrored ones.
+
+Video additionally gets **▣ Crop**: drag a rectangle (with rule-of-thirds
+guides) to send only part of the frame freeform or locked to 1:1, 16:9, 9:16, 4:3, 3:4, 3:2, 2:3, 21:9 or 9:21, with the resulting pixel size shown live. Once set, the rectangle stays on
+the preview with everything outside it dimmed, so the framing is always visible;
+pressing ▣ again just puts the handles away. Handy for cutting a subject
+out of wider footage instead of re-exporting.
+
+Two things it's for:
+
+- **Getting inside the budget.** A 40-second song or a long take doesn't need
+  re-exporting; trim it to the seconds you want. The file counter, the ♪ audio
+  counter, and the 2–15s and 15s-total checks all measure the *trimmed* span.
+- **Continuing a video.** `2s⇥` and `3s⇥` set the trim to the clip's final
+  seconds in one click, which is exactly what a continuation reference wants —
+  the motion and audio leading into the new clip, without spending your whole
+  budget on footage the model doesn't need.
+
+The scissors glow amber when a trim is active, and the trim travels with media
+presets and with saved workflows.
+
+One wrinkle worth knowing: a trim applies to the *item*, so trimming a video
+trims its frames and its paired soundtrack together. To keep the full video but
+only a few seconds of its audio, set the video's audio to `off` and load the
+audio separately, then trim that copy.
+
+You can also skip the Media Loader entirely and wire your own loaders — the
+[FAQ](#do-i-have-to-use-the-media-loader) covers every route.
+
+![Reference mode editor layout](docs/5.png)
+
+*Reference mode — all six sections, with every connected reference available to
+cite.*
+
+### Presets
+
+The Media Loader can save your current set of references — which files, their
+order, and each video's audio setting — under a name, and reload it later from
+the preset picker.
+
+The picker is the pack's own dropdown rather than a native `<select>`: the
+native one sat inside the node's widget area, which the ComfyUI frontend
+repositions on every canvas redraw, and any touch collapses an open native
+picker — the "dropdown flashes and closes" bug. The pack's popover can only be
+closed by you: pick an entry, click elsewhere, or press Escape.
+
+Presets can be filed into **categories**. The picker has the same bar the
+prompt library does — a search box, a category dropdown, and a ✎ to rename or
+clear the selected category — above a list grouped by category, with
+uncategorised sets last. Set a category when you save, or file an existing
+preset from the picker with the ✎ on its row; that only changes the label,
+never the media. Categories are a view, not folders: preset
+names stay unique across the whole set, because a prompt links to a preset by
+name.
+
+Presets point at files you already uploaded rather than copying them, so saving
+and loading is instant. If you later delete one of those files, loading the
+preset skips it and tells you which one is missing. Deleting a preset never
+deletes your media.
+
+---
+
+---
+
+## FAQ: wiring reference media
+
+This is the fiddly part, so here's the whole picture.
+
+### Do I have to use the Media Loader?
+
+No. There are three ways to get media in, and they all work:
+
+1. **Media Loader → Prompt Builder.** One cable. Easiest, and previews plus tag
+   numbering come free.
+2. **Your own loaders → Prompt Builder.** Wire `LoadImage` and friends into the
+   Prompt Builder's `picture_1`, `video_1`, `audio_1` inputs.
+3. **Straight to the native node.** Skip this pack's media handling entirely and
+   wire your loaders directly into **MiniMax H3 Reference to Video**. You still
+   get a well-formed prompt; you just won't get thumbnails in the editor.
+
+Options 1 and 2 mix freely. If a slot has its own input wired, that wins;
+anything else falls back to the Media Loader's bundle.
+
+### Which output goes where?
+
+The Prompt Builder has a `prompt` output plus one output per media slot.
+
+| From Prompt Builder | To MiniMax H3 Reference to Video |
+|---|---|
+| `prompt` | `prompt` |
+| `picture_1` … `picture_9` | `ref_images` slots |
+| `video_1` … `video_3` | `ref_videos` slots |
+| `video_audio_1` … `video_audio_3` | `ref_video_audios` slots |
+| `audio_1` … `audio_3` | `ref_audios` slots |
+
+The native node's slots start at 0 while ours start at 1, so `picture_1` goes to
+`ref_image_0`. Keep them in the same order.
+
+### Then what's the Reference Splitter for?
+
+Only for when you want media to reach the sampler *without* going through the
+Prompt Builder — for instance if you keep the builder off to one side. Media
+Loader → Splitter → native node. If you're already routing media through the
+Prompt Builder, you don't need it. There's a button on the Media Loader that
+adds one, wired up.
+
+### How do tags get their numbers?
+
+This is the one that trips people up, so it's worth reading.
+
+H3 numbers references **by the order they arrive**, not by which slot they're
+plugged into. Two consequences:
+
+- **Gaps close up.** If you only fill `picture_2` and `picture_5`, they become
+  `<Picture 1>` and `<Picture 2>`.
+- **A video's soundtrack takes a low audio number.** It's presented right before
+  its own video, so with one video (with sound) plus one standalone audio clip,
+  the soundtrack is `<Audio 1>` and the standalone clip is `<Audio 2>` — even
+  though the standalone one might feel like it should come first.
+
+You don't have to work this out yourself. The Media Loader shows the exact tag
+order along the bottom of the node, and the editor's thumbnails are labelled
+with the tag each one will actually get. Trust those over intuition.
+
+### Why is a video's audio a separate thing at all?
+
+ComfyUI has no single "video with sound" type, so frames and audio travel on
+separate wires. The Media Loader splits it for you automatically when you drop
+in a video file. If you're wiring your own loaders, you'll need one that gives
+you frames and audio separately.
+
+The model treats them as one thing internally — the separation is just plumbing.
+
+### What do off / paired / alone do?
+
+That's the little control on a video row when the file has sound. There's a **?**
+button next to the videos heading that explains it in the node, but in short:
+
+- **paired** — the sound belongs to this footage. Use it for on-screen dialogue
+  where lip sync matters, action sounds that need to land on the right frames,
+  or when you're keeping a source video's original audio.
+- **alone** — you want the audio as a *reference* rather than as this clip's
+  soundtrack: borrowing a voice, a music style, some ambience. Also the right
+  pick when you're not reusing the video's visuals in sync.
+- **off** — ignore the audio entirely.
+
+### Why does one video count as two files?
+
+H3 takes at most 12 references in total, and a video's split-off soundtrack is
+its own reference. So a video with `paired` or `alone` audio uses two of your
+twelve. Set it to `off` and you get one back.
+
+It also spends part of a second budget: H3 accepts **three audio clips**, and a
+split soundtrack is one of them even though it travels in a different input
+group on the native node. Three videos with their sound enabled therefore use
+your whole audio allowance. The loader shows both counters — files and ♪ audio —
+and warns when either is exceeded.
+
+Reference clips should also run 2–15 seconds each, and — this is the one people
+miss — **15 seconds is the total across all clips of a type, not a per-clip
+allowance**. Three 15-second audio clips is 45 seconds and three times over
+budget; three clips only fit if they average about five seconds each. A split
+soundtrack spends from both totals at once: a 12-second video with its audio on
+uses 12 of your 15 video seconds *and* 12 of your 15 audio seconds, leaving 3
+seconds of audio for anything else.
+
+Audio also can't be sent without at least one image or video alongside it.
+
+The loader flags all of these, and the ✂ trim is usually the fix — see
+[Trimming and cropping clips](#trimming-and-cropping-clips).
+
+Go over twelve and you get a red warning. The node deliberately won't drop
+anything for you — removing a reference renumbers every tag after it, which
+would quietly invalidate tags already written into your prompt.
+
+### Does switching mode change what gets sent?
+
+Yes — the saved mode decides what the outputs carry, so cables can stay
+plugged in permanently. Keep `picture_1` wired to `first_frame`, and a prompt
+saved in T2VA mode sends nothing but the prompt; switch the editor to I2VA and
+Save, and picture 1 flows again. What each mode sends is written right under
+the mode buttons in the editor, unusable media is greyed out in the rail, and
+the console prints exactly what was withheld on each run — so a gated
+reference is visible three ways before a render finishes.
+
+Mode and prompt are saved together by the editor's **Save**, so they can never
+disagree with each other. If the node's state is missing or unreadable, the
+gate fails open and passes everything rather than silently withholding.
+
+For per-item control within a mode, the ◉ toggle on the Media Loader switches
+one reference off without unplugging anything.
+
+### One loader, two pipelines
+
+An example workflow using this pattern ships with the pack — load
+**MMH3PromptBuilder_AIO_Example** from ComfyUI's workflow browser (Workflows →
+Browse Templates → this pack), or open
+`example_workflows/MMH3PromptBuilder_AIO_Example.json` directly. It needs
+[VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) for
+the video output and
+[KJNodes](https://github.com/kijai/ComfyUI-KJNodes) for the Set/Get nodes.
+
+The example is set up for a 4-step turbo LoRA, with **Sigma Shift at 12 video /
+6 audio**. That audio value is deliberate: the released base configuration is
+12/3, but distilled turbo LoRAs compress the video trajectory, and since the
+audio schedule is derived from the video one, 6 keeps audio aligned at low step
+counts. Running the base FL2VA model without a turbo LoRA? Put it back to 3.
+
+
+The builder also has a **references** output (last slot): the same bundle it
+received, gated to the saved mode, ready for a **Reference Splitter**. That
+makes a single Media Loader + Prompt Builder able to drive both an fl2va
+pipeline and a ref2va pipeline — wire the builder's `references` through a
+Set/Get pair into each pipeline's own splitter, keep one pipeline bypassed,
+and the saved mode decides what media flows: switch to FL2VA and Save, and the
+ref2va side's splitter receives only pictures 1–2; switch to REF and the full
+set flows again. Gating lives in one place — the builder — no matter how many
+pipelines fan out from it.
+
+### Can I wire every output once and leave it?
+
+Yes — that's the intended way to work. Connect all of the Prompt Builder's media
+outputs to the matching slots on **MiniMax H3 Reference to Video** once, and
+leave the workflow alone.
+
+Slots with nothing in them pass through empty, and the H3 node skips them. The
+tags close up around whatever is actually present, so three images in slots 1, 2
+and 3 are `<Picture 1>`–`<Picture 3>` whether or not the other six are wired.
+
+That pairs with the ◉ toggle on the Media Loader: rather than unplugging cables
+between runs, switch an item off and it stops reaching the model — the tag
+numbering adjusts, and the Prompt Builder's checks update to match.
+
+### What if I connect an image but never mention it in the prompt?
+
+Nothing errors, but it does affect the result. The image is still handed to the
+model, labelled, and taken into account — you've just given it no instructions
+about what to do with it. It can bleed into the output in ways you didn't ask
+for, and it costs render time and VRAM on every step.
+
+The editor flags this: a reference thumbnail showing an amber dash instead of a
+count hasn't been mentioned yet. Either write it into your description or
+disconnect it.
+
+### Where do first and last frames go for the non-reference modes?
+
+Keyframes work differently from references. In I2VA, FL2VA, and L2VA your images
+are exact frames of the finished video, so they go to the `first_frame` and
+`last_frame` inputs on **MiniMax H3 Image to Video** — not to the `ref_images`
+slots, which exist only on the reference node and mean "here's something to draw
+from", not "here's a frame".
+
+Either loader works. Previews in the editor come from routing an image through
+the Prompt Builder — which you can do with a **Load Image** node just as well as
+with the Media Loader — so the Media Loader's advantage is convenience rather
+than capability. See [Quick start](#quick-start) for the wiring.
+
+These modes take one image each, except FL2VA which takes two. Wire in more and
+the editor tells you exactly which ones will be ignored.
+
+### My video length and the prompt disagree
+
+For first/last-frame modes the prompt states when the last frame lands, so it
+has to match the length you're actually generating. The editor shows the correct
+frame count for your chosen end time — put that number into the native node's
+`length`. H3 only accepts certain frame counts, and the editor already rounds to
+a valid one.
+
+---
+
+## Dated output folders
+
+Save nodes expand date tokens from their own widget, so a prefix like
+`MiniMaxH3/%date:yyyy-MM-dd%/vid` only works when it's typed straight into the
+save node. Route it through a string node, a switch, or anything else and the
+token arrives verbatim — you get a folder literally named `%date:yyyy-MM-dd%`.
+That's a known issue in VideoHelperSuite among others.
+
+**Fantastic H3 Filename Prefix** builds the prefix from parts and resolves the
+date itself, so what reaches the save node is a plain string that survives any
+amount of wiring:
+
+- **folder** — click **📁 Browse…** for a folder browser that walks your
+  ComfyUI output directory: click a folder to enter it, `..` to go up, and
+  **Create** to make a new one on the spot. Or just type a path.
+- **subfolder** — optional extra levels, created if missing (`Ref2V`,
+  `client/act2`).
+- **date_folder** — off, or a dated folder in your preferred format
+  (`YYYY-MM-DD`, `YYYY/MM/DD`, `YYYY-MM-DD_HH-MM`, and so on).
+- **filename** — the start of the file name; the save node still appends its
+  own counter.
+
+So folder `MiniMaxH3`, subfolder `Ref2V`, date `YYYY-MM-DD`, filename `vid`
+gives `MiniMaxH3/Ref2V/2026-08-07/vid_00001.mp4`.
+
+Date tokens still work inside **subfolder** and **filename** if you want them
+there — `%date:hhmmss%` or strftime `%H%M%S` — so `vid_%date:hhmm%` becomes
+`vid_1409`. The node re-evaluates every run, so the date can't get stuck on
+whatever it was when the workflow was loaded.
+
+---
+
+## Troubleshooting
+
+### The media loader looks empty after opening a workflow
+
+Fixed in 1.5.7. Earlier versions could overwrite the loaded media when the
+node's hidden state widget wasn't readable yet — which happens while a
+workflow is still loading, or when a node is detached as you switch tabs. The
+panel treats an unreadable widget as "not ready" now and keeps what it has,
+rather than reading it as "no media".
+
+Your files are never touched by this; only the node's list of them was.
+
+### The node appears but has no panel or buttons
+
+The Python side registered fine — you can see `media_state` or `builder_state`
+as a plain text widget — but the interface didn't build. That's the frontend
+script failing, and almost always one of:
+
+1. **A stale browser cache.** Python reloads on restart, JavaScript doesn't.
+   Hard-refresh with Ctrl+Shift+R, or try an incognito window.
+2. **Another extension throwing during load,** which can stop later ones
+   registering. Open the browser console (F12) — the first red error usually
+   names the culprit, and it often isn't this pack.
+3. **A partial install.** `custom_nodes/<this pack>/web/` should contain
+   `promptbuilder.js`, `medialoader.js`, `fileprefix.js` and the guide.
+
+If this pack itself is the one failing, the node now shows a **⚠ UI failed**
+button — click it for the error, and include that text in a bug report.
+
+### Anything else
+
+**The nodes don't appear.** ComfyUI needs a full restart, not a page refresh.
+Check the startup console for errors mentioning MiniMaxH3.
+
+**I updated but nothing changed.** ComfyUI caches extension files aggressively.
+Open DevTools (F12), tick *Disable cache* in the Network tab, and reload with it
+open. If a node's *outputs* look wrong specifically, that's a restart issue
+rather than a browser one — and nodes already placed in a workflow keep their
+old slots, so delete and re-add them after an update.
+
+**Videos are rejected.** PyAV failed to import. ComfyUI core requires PyAV, so
+this almost always means another pack downgraded or broke it (a known culprit:
+`aiortc` pins `av<17`, which ComfyUI's own code can't run with).
+`pip install 'av>=17'` into your ComfyUI environment restores it.
+
+**A button does nothing.** Open the browser console (F12) and click it again —
+any failure prints there. The Media Loader also has an **Open loader…** button
+that works independently of the on-node panel.
+
+**Something looks squashed or overlapping.** This pack works with both the
+classic node renderer and Nodes 2.0. If a panel misbehaves in one of them, the
+modal buttons (**Edit prompt…**, **Open loader…**) always work regardless.
+
+---
+
+## Credits
+
+Prompt structure follows MiniMax's official *Video Prompt Writing Guide*, which
+ships with this pack — click 📖 in the editor to read it.
+
+Built against ComfyUI's native MiniMax H3 support.
+
+## License
+
+MIT

@@ -1,0 +1,7 @@
+How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 3.04-second mark of the target video.
+
+integrated_multimodal_description: [Shot 1] Live-action, UGC beauty commercial, a static medium close-up frames a young woman in a grey blazer over a cream turtleneck, seated on a light-beige sofa in a bright minimal room with soft diffused daylight from the window on the left. Her right hand holds the open pale-pink cushion compact up beside her cheek, with the mirror and the pale-beige cushion pan visible inside the gold rim. Her left hand rises from her lap, and her thumb and index finger pinch the soft pale-pink puff, lifting it out of the compact and holding it up in front of her chest with its rounded velvety surface facing the camera, a short distance from the open compact. She looks straight into the lens and speaks to camera in a warm, clear female voice (S1), her lips and jaw moving naturally with the words. Her head and shoulders stay still and her right hand keeps the compact steady. The camera holds a static shot and the framing, scale, background, lighting and colour grade stay exactly the same from beginning to end.
+
+overall_soundscape: Quiet indoor room tone continues throughout, with a faint soft rustle of fabric and a light dry brush of the puff against the sponge.
+
+non_diegetic_music: N/A

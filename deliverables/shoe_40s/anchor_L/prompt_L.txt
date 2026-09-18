@@ -1,0 +1,7 @@
+Keep the man from the first frame exactly as he is — the identical face, the identical short black hair, the identical plain white crew-neck t-shirt, the identical smooth light grey concrete studio wall behind him, and the identical soft even frontal lighting and medium close-up chest-up framing. Do not change his identity, his hairstyle, his clothing, the background or the camera framing at any moment.
+
+integrated_multimodal_description: [Shot 1] A medium close-up chest-up vertical studio portrait of a young Chinese man standing still in front of a smooth light grey concrete wall, lit by soft even frontal light. He looks straight into the lens and speaks directly to the viewer for the whole shot, talking naturally in fluent Mandarin Chinese with clear, well-articulated lip movements: his lips, jaw and mouth open and close visibly and rhythmically in sync with his speech, and small natural eyebrow and cheek movements follow the emphasis of what he says. His head stays almost still and centred with only faint natural micro-motions, his shoulders and arms stay still and out of frame, and he does not gesture, does not turn away, does not walk, does not pick anything up and does not change his pose. A soft gentle light shift drifts slowly across his face. The background stays clean and unchanged and both sides of the frame remain empty.
+
+overall_soundscape: Quiet indoor studio room tone, very soft and low, together with the natural close-miked sound of his Mandarin speech.
+
+non_diegetic_music: none

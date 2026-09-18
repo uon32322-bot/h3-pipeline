@@ -1,0 +1,7 @@
+How the reference pictures align with the target video — Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; Picture 2 (from Shot 1) aligns with the 3.04-second mark of the target video.
+
+integrated_multimodal_description: [Shot 1] Live-action, UGC beauty commercial, a static medium close-up frames a young woman in a grey blazer over a cream turtleneck, seated on a light-beige sofa in a bright minimal room, holding a closed pale-pink cushion compact up beside her cheek at eye level. Her thumb presses the edge of the lid and the lid swings open on its hinge until the pale-beige cushion pan and the polished mirror are fully revealed. She looks into the lens with a calm, friendly expression and speaks to camera in a warm, clear female voice (S1), her lips and jaw moving naturally with the words. The camera holds a static shot and the framing, scale, background, lighting and colour grade stay exactly the same from beginning to end.
+
+overall_soundscape: Quiet indoor room tone continues throughout, with a soft fabric rustle and a faint click as the compact lid opens.
+
+non_diegetic_music: N/A

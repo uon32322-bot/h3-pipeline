@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>闸门② 动作白名单 · 勾选清单</title>
+<style>
+  :root{
+    --bg:#F7F6F3; --card:#FFFFFF; --line:#E3E1DA; --line2:#D3D1C7;
+    --ink:#2C2C2A; --ink2:#5F5E5A; --ink3:#888780;
+    --pass-bg:#EAF3DE; --pass-ln:#B6D48A; --pass-tx:#3B6D11;
+    --cond-bg:#FAEEDA; --cond-ln:#E9C48A; --cond-tx:#633806;
+    --deny-bg:#FCEBEB; --deny-ln:#EFB4B4; --deny-tx:#A32D2D;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:40px 28px 72px}
+  h1{font-size:22px; font-weight:600; margin:0 0 6px}
+  h2{font-size:16px; font-weight:600; margin:0 0 4px}
+  h3{font-size:13px; font-weight:600; margin:0 0 8px}
+  .sub{color:var(--ink2); margin:0 0 4px}
+  .quote{
+    margin:18px 0 0; padding:14px 18px; background:var(--card);
+    border-left:3px solid var(--ink); border-radius:0 8px 8px 0; color:var(--ink);
+  }
+  section{margin-top:40px}
+  .sect-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+  .sect-head .num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:22px; height:22px; border-radius:50%; background:var(--ink); color:#fff;
+    font-size:12px; font-weight:600; flex:none;
+  }
+  .sect-head p{margin:0; color:var(--ink3); font-size:13px}
+
+  .rules{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .rule-box{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px}
+  .rule-box.red{border-color:var(--deny-ln)}
+  .rule-box.amber{border-color:var(--cond-ln)}
+  .rule-box h3.red{color:var(--deny-tx)}
+  .rule-box h3.amber{color:var(--cond-tx)}
+  .rule-box ul{margin:0; padding-left:18px}
+  .rule-box li{margin:6px 0; color:var(--ink2)}
+  .rule-box li b{color:var(--ink); font-weight:600}
+  .rule-box .tip{color:var(--ink3); font-size:12px}
+
+  .legend{display:flex; gap:16px; flex-wrap:wrap; margin-bottom:12px; font-size:12px; color:var(--ink2)}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .swatch{width:10px; height:10px; border-radius:3px; flex:none}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(196px,1fr)); gap:10px}
+  .card{
+    text-align:left; background:var(--card); border:1px solid var(--line); border-radius:10px;
+    padding:11px 13px; cursor:pointer; font-family:inherit; font-size:13px; color:var(--ink);
+    transition:border-color .12s, transform .12s, box-shadow .12s;
+  }
+  .card:hover{border-color:var(--ink3); transform:translateY(-1px); box-shadow:0 2px 8px rgba(0,0,0,.05)}
+  .card.pass{border-left:3px solid var(--pass-ln)}
+  .card.cond{border-left:3px solid var(--cond-ln)}
+  .card.deny{border-left:3px solid var(--deny-ln)}
+  .card .nm{display:block; font-weight:600; margin-bottom:2px}
+  .card .ds{display:block; color:var(--ink3); font-size:12px; line-height:1.45}
+  .card .tagline{
+    display:inline-block; margin-top:6px; font-size:11px; padding:1px 7px;
+    border-radius:20px; font-weight:600;
+  }
+  .card.pass .tagline{background:var(--pass-bg); color:var(--pass-tx)}
+  .card.cond .tagline{background:var(--cond-bg); color:var(--cond-tx)}
+  .card.deny .tagline{background:var(--deny-bg); color:var(--deny-tx)}
+
+  .rows{display:flex; flex-direction:column; gap:12px}
+  .row{background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .row.deny{border-color:var(--deny-ln); background:linear-gradient(0deg,rgba(252,235,235,.45),rgba(252,235,235,.45)),var(--card)}
+  .row.cond{border-color:var(--cond-ln); background:linear-gradient(0deg,rgba(250,238,218,.45),rgba(250,238,218,.45)),var(--card)}
+  .row.pass{border-color:var(--pass-ln); background:linear-gradient(0deg,rgba(234,243,222,.45),rgba(234,243,222,.45)),var(--card)}
+  .rowhead{display:flex; gap:10px; align-items:center; margin-bottom:12px}
+  .rowhead .idx{
+    flex:none; width:24px; height:24px; border-radius:6px; background:#F1EFE8; color:var(--ink2);
+    display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:600;
+  }
+  .rowhead input[type=text]{
+    flex:1; min-width:0; font:inherit; padding:7px 10px; border:1px solid var(--line2);
+    border-radius:8px; background:#fff; color:var(--ink);
+  }
+  .rowhead input[type=text]:focus{outline:none; border-color:var(--ink3)}
+  .badge{
+    flex:none; font-size:12px; font-weight:600; padding:3px 12px; border-radius:20px; white-space:nowrap;
+  }
+  .badge.pass{background:var(--pass-bg); color:var(--pass-tx)}
+  .badge.cond{background:var(--cond-bg); color:var(--cond-tx)}
+  .badge.deny{background:var(--deny-bg); color:var(--deny-tx)}
+  .del{
+    flex:none; width:26px; height:26px; border-radius:6px; border:1px solid var(--line2); background:#fff;
+    color:var(--ink3); cursor:pointer; font-size:15px; line-height:1; padding:0;
+  }
+  .del:hover{border-color:var(--deny-ln); color:var(--deny-tx)}
+  .qs{display:grid; grid-template-columns:1fr 1fr; gap:14px}
+  .qgroup .qtitle{font-size:11px; font-weight:600; color:var(--ink3); letter-spacing:.02em; margin-bottom:6px}
+  .qlist{display:flex; flex-wrap:wrap; gap:6px 14px}
+  .opt{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--ink2); cursor:pointer}
+  .opt input{margin:0; accent-color:#5F5E5A; cursor:pointer}
+  .opt.on{color:var(--ink); font-weight:600}
+  .why{margin-top:11px; font-size:12px; color:var(--ink2); padding-top:10px; border-top:1px dashed var(--line)}
+  .why b{color:var(--ink)}
+  .why .req{color:var(--cond-tx); font-weight:600}
+  .why .alt{color:var(--deny-tx); font-weight:600}
+
+  .toolbar{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:16px}
+  button.btn{
+    font:inherit; font-size:13px; font-weight:600; padding:8px 16px; border-radius:8px;
+    border:1px solid var(--line2); background:#fff; color:var(--ink); cursor:pointer;
+  }
+  button.btn:hover{border-color:var(--ink3)}
+  button.btn.primary{background:var(--ink); color:#fff; border-color:var(--ink)}
+  .summary{
+    margin-top:16px; padding:14px 18px; background:var(--card); border:1px solid var(--line);
+    border-radius:12px; display:flex; gap:22px; flex-wrap:wrap; align-items:center;
+  }
+  .summary .stat{display:flex; align-items:center; gap:7px; font-size:13px; color:var(--ink2)}
+  .summary .stat b{font-size:17px; font-weight:600}
+  .summary .stat.pass b{color:var(--pass-tx)}
+  .summary .stat.cond b{color:var(--cond-tx)}
+  .summary .stat.deny b{color:var(--deny-tx)}
+  .gate-msg{
+    margin-top:12px; padding:12px 18px; border-radius:12px; font-size:13px; font-weight:600;
+  }
+  .gate-msg.block{background:var(--deny-bg); color:var(--deny-tx); border:1px solid var(--deny-ln)}
+  .gate-msg.ok{background:var(--pass-bg); color:var(--pass-tx); border:1px solid var(--pass-ln)}
+  .empty{color:var(--ink3); font-size:13px; padding:20px 0; text-align:center}
+  footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--ink3); font-size:12px}
+  @media (max-width:720px){
+    .rules,.qs{grid-template-columns:1fr}
+    .wrap{padding:26px 16px 56px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>闸门② 动作白名单 · 勾选清单</h1>
+  <p class="sub">分镜表定稿之后、派发 GPU 之前，把每一个动作逐个过一遍这张表。任一项判为「否决」，就不许进提示词。</p>
+  <div class="quote" id="coreRule"></div>
+
+  <section>
+    <div class="sect-head">
+      <span class="num">1</span>
+      <h2>判定标准</h2>
+      <p>先看红线，红线全否再看条件。</p>
+    </div>
+    <div class="rules">
+      <div class="rule-box red">
+        <h3 class="red">红线问 · 任一命中即否决</h3>
+        <ul id="redList"></ul>
+        <p class="tip" style="margin:10px 0 0">命中就是扩散模型的架构属性，不是提示词问题 —— 改 prompt 修不好，换模型也一样。</p>
+      </div>
+      <div class="rule-box amber">
+        <h3 class="amber">条件问 · 命中即需首尾帧夹住</h3>
+        <ul id="condList"></ul>
+        <p class="tip" style="margin:10px 0 0">放行条件：FL2VA 首尾帧夹住 · 段长不超过 2.5 秒 · 单次不重复 · 中间锚点不超过 1 个 · 动作落在段前 40% 到 60%。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sect-head">
+      <span class="num">2</span>
+      <h2>动作速查库</h2>
+      <p>点一下，下面就生成一行已经填好的判定，可直接改。</p>
+    </div>
+    <div class="legend">
+      <span><span class="swatch" style="background:#B6D48A"></span>放行 · 直接可生成</span>
+      <span><span class="swatch" style="background:#E9C48A"></span>需条件 · 要夹首尾帧</span>
+      <span><span class="swatch" style="background:#EFB4B4"></span>否决 · 改实拍或后期</span>
+    </div>
+    <div class="grid" id="lib"></div>
+  </section>
+
+  <section>
+    <div class="sect-head">
+      <span class="num">3</span>
+      <h2>逐项判定</h2>
+      <p>对照你的分镜表，一个动作一行。</p>
+    </div>
+    <div class="rows" id="rows"></div>
+    <div class="toolbar">
+      <button class="btn primary" id="addBlank">＋ 添加一个动作</button>
+      <button class="btn" id="clearAll">清空全部</button>
+      <button class="btn" id="copyOut">复制判定结果</button>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="gate-msg" id="gateMsg" style="display:none"></div>
+  </section>
+
+  <footer>
+    闸门② 属于「六步 + 三道闸门」流水线的第 2 道，装在文案与分镜的交界处。
+    完整依据见 REPORT7（崩坏分诊）与 REPORT10（流水线审计）。
+  </footer>
+</div>
+
+<script>
+var RED = [
+  ["R1","守恒量变化","液体 / 膏体 / 粉末 / 用量 明显减少或增加"],
+  ["R2","接触物理","抓握 / 按压 / 挤压 / 形变 / 流体 / 飞溅 / 落地"],
+  ["R3","可验证的物理结果","画面能看出「因为做了 A，所以变成 B」"],
+  ["R4","内容物出容器","挤出 / 倒出 / 喷出，并且结果可见"],
+  ["R5","多步因果链","两个以上互相依赖的动作"]
+];
+var COND = [
+  ["C1","单次开合 / 旋盖 / 翻转","有明确终点，不重复"],
+  ["C2","单次状态变化","满到少、干到湿的起点与终点"],
+  ["C3","手有整体位移","举起 / 放下 / 推近"]
+];
+
+var LIB = [
+  {g:"pass", n:"转盘旋转",      d:"产品原地自转展示一周",           p:[]},
+  {g:"pass", n:"推近 / 拉远",   d:"纯运镜，镜头推近或拉远",         p:[]},
+  {g:"pass", n:"环绕运镜",      d:"相机绕主体画弧",                 p:[]},
+  {g:"pass", n:"静置特写平移",  d:"产品不动，镜头横移",             p:[]},
+  {g:"pass", n:"光影扫过",      d:"高光或反光沿表面流动",           p:[]},
+  {g:"pass", n:"滑入 / 滑出",   d:"多款式从画面外滑入或滑出",       p:[]},
+  {g:"pass", n:"多款式并排",    d:"不同颜色或型号排开陈列",         p:[]},
+  {g:"pass", n:"升起 / 悬浮",   d:"产品离台升起或悬停",             p:[]},
+  {g:"pass", n:"画面内文字动效",d:"文案淡入、滑入或单行位移",       p:[]},
+  {g:"pass", n:"颜色 / 款式切换",d:"同一产品换色，靠锚定照约束",    p:[]},
+
+  {g:"cond", n:"盒盖开合",      d:"盒盖从合到开到某角度停住",       p:["C1"]},
+  {g:"cond", n:"旋开盖子",      d:"盖子旋开，不露出内容物",         p:["C1"]},
+  {g:"cond", n:"单次翻转",      d:"产品翻转一次到位，不连续翻滚",   p:["C1"]},
+  {g:"cond", n:"手举起产品",    d:"手拿产品举到镜头前",             p:["C3"]},
+  {g:"cond", n:"手放下产品",    d:"产品从手中放到台面",             p:["C3"]},
+  {g:"cond", n:"手推产品靠近",  d:"手带产品整体位移",               p:["C3"]},
+  {g:"cond", n:"单次状态变化",  d:"满到少、干到湿，只做起点与终点", p:["C2"]},
+  {g:"cond", n:"喷雾扩散",      d:"只拍雾化扩散段，不拍喷出源头",   p:["C2"]},
+
+  {g:"deny", n:"倒出液体",      d:"瓶口倾倒，液体流出",             p:["R1","R2","R4"], a:"只拍倾倒前的举起动作，倾倒过程实拍补"},
+  {g:"deny", n:"液量减少",      d:"瓶子里的液体明显变少",           p:["R1","R3"],      a:"用状态帧插值，仅限单次且不超过 2 秒"},
+  {g:"deny", n:"膏体挤出",      d:"管状产品挤出膏体",               p:["R1","R2","R4"], a:"挤出特写实拍，AI 只做前后环境"},
+  {g:"deny", n:"挤压瓶身变形",  d:"手指挤压使瓶身凹陷",             p:["R1","R2"],      a:"改为瓶身静止加光影扫过"},
+  {g:"deny", n:"涂抹 / 按摩",   d:"涂抹后皮肤状态改变",             p:["R2","R3"],      a:"改为产品上手静止特写，效果实拍或后期"},
+  {g:"deny", n:"手指拧 / 按 / 扣",d:"手指做精细操作",               p:["R2"],           a:"改为盖已旋开的状态帧，或只拍静态持握"},
+  {g:"deny", n:"撕开包装取出",  d:"撕开包装并取出内容物",           p:["R2","R4"],      a:"拆包实拍，AI 做拆开后的陈列镜头"},
+  {g:"deny", n:"多步使用流程",  d:"连着做两个以上互相依赖的动作",   p:["R2","R3","R5"], a:"拆成多个单步镜头，每镜只留一个动作"},
+  {g:"deny", n:"使用前后对比",  d:"同一位置前后状态对照",           p:["R3","R1"],      a:"分别生成两个状态帧，用切镜对比"},
+  {g:"deny", n:"粉末减少",      d:"粉末或颗粒明显变少",             p:["R1","R3"],      a:"状态帧插值，或改为粉末静止加镜头推近"},
+  {g:"deny", n:"液体飞溅 / 落地",d:"液体溅起或落地散开",            p:["R2","R4"],      a:"实拍"}
+];
+
+var LABEL = {pass:"放行", cond:"需条件", deny:"否决"};
+
+document.getElementById("coreRule").innerHTML =
+  "核心判据：<b>这个动作有没有可验证的物理结果？</b>　有 —— 必实拍或后期；无 —— AI 够用。";
+
+document.getElementById("redList").innerHTML = RED.map(function(r){
+  return "<li><b>" + r[1] + "</b>　<span class='tip'>" + r[2] + "</span></li>";
+}).join("");
+document.getElementById("condList").innerHTML = COND.map(function(c){
+  return "<li><b>" + c[1] + "</b>　<span class='tip'>" + c[2] + "</span></li>";
+}).join("");
+
+var libEl = document.getElementById("lib");
+LIB.forEach(function(item){
+  var b = document.createElement("button");
+  b.className = "card " + item.g;
+  b.innerHTML = "<span class='nm'>" + item.n + "</span>" +
+                "<span class='ds'>" + item.d + "</span>" +
+                "<span class='tagline'>" + LABEL[item.g] + "</span>";
+  b.addEventListener("click", function(){ addRow(item); });
+  libEl.appendChild(b);
+});
+
+var rowsEl = document.getElementById("rows");
+
+function allKeys(){
+  return RED.map(function(r){return r[0];}).concat(COND.map(function(c){return c[0];}));
+}
+
+function addRow(item){
+  var desc = item ? item.n + " —— " + item.d : "";
+  var pre  = item ? item.p : [];
+  var el = document.createElement("div");
+  el.className = "row";
+
+  var redHtml = RED.map(function(r){
+    var on = pre.indexOf(r[0]) >= 0 ? " checked" : "";
+    return "<label class='opt" + (on?" on":"") + "' title='" + r[2] + "'>" +
+           "<input type='checkbox' data-k='" + r[0] + "'" + on + "><span>" + r[1] + "</span></label>";
+  }).join("");
+  var condHtml = COND.map(function(c){
+    var on = pre.indexOf(c[0]) >= 0 ? " checked" : "";
+    return "<label class='opt" + (on?" on":"") + "' title='" + c[2] + "'>" +
+           "<input type='checkbox' data-k='" + c[0] + "'" + on + "><span>" + c[1] + "</span></label>";
+  }).join("");
+
+  el.innerHTML =
+    "<div class='rowhead'>" +
+      "<span class='idx'></span>" +
+      "<input type='text' placeholder='动作描述，例如：模特把面霜瓶举到镜头前' value='" +
+        desc.replace(/'/g,"&#39;") + "'>" +
+      "<span class='badge'>待判定</span>" +
+      "<button class='del' title='删除这一项'>×</button>" +
+    "</div>" +
+    "<div class='qs'>" +
+      "<div class='qgroup'><div class='qtitle'>红线问 · 任一命中即否决</div>" +
+        "<div class='qlist'>" + redHtml + "</div></div>" +
+      "<div class='qgroup'><div class='qtitle'>条件问 · 命中即需首尾帧夹住</div>" +
+        "<div class='qlist'>" + condHtml + "</div></div>" +
+    "</div>" +
+    "<div class='why'></div>";
+
+  el.querySelector(".del").addEventListener("click", function(){ el.remove(); refresh(); });
+  el.querySelectorAll("input[type=checkbox]").forEach(function(cb){
+    cb.addEventListener("change", function(){
+      cb.parentNode.classList.toggle("on", cb.checked);
+      refresh();
+    });
+  });
+  el.querySelector("input[type=text]").addEventListener("input", function(){ refresh(); });
+
+  rowsEl.appendChild(el);
+  refresh();
+}
+
+function readRow(el){
+  var s = {};
+  el.querySelectorAll("input[type=checkbox]").forEach(function(cb){ s[cb.dataset.k] = cb.checked; });
+  return s;
+}
+
+function verdict(s){
+  var hitRed  = RED.filter(function(r){ return s[r[0]]; });
+  var hitCond = COND.filter(function(c){ return s[c[0]]; });
+  if (hitRed.length)  return {v:"deny", hitRed:hitRed, hitCond:hitCond};
+  if (hitCond.length) return {v:"cond", hitRed:hitRed, hitCond:hitCond};
+  return {v:"pass", hitRed:[], hitCond:[]};
+}
+
+function refresh(){
+  var all = rowsEl.querySelectorAll(".row");
+  var count = {pass:0, cond:0, deny:0};
+
+  all.forEach(function(el, i){
+    el.querySelector(".idx").textContent = (i + 1);
+    var s = readRow(el);
+    var r = verdict(s);
+    count[r.v]++;
+
+    el.classList.remove("pass","cond","deny");
+    el.classList.add(r.v);
+
+    var badge = el.querySelector(".badge");
+    badge.className = "badge " + r.v;
+    badge.textContent = LABEL[r.v];
+
+    var why = el.querySelector(".why");
+    if (r.v === "deny"){
+      why.innerHTML = "否决原因：<b class='alt'>" +
+        r.hitRed.map(function(x){return x[1];}).join("、") + "</b>　→　" +
+        "改为实拍或后期。这类动作调提示词修不好。若必须生成，只能走状态帧插值且仅限单次、不超过 2 秒、只做起点与终点。";
+    } else if (r.v === "cond"){
+      why.innerHTML = "触发条件：<b class='req'>" +
+        r.hitCond.map(function(x){return x[1];}).join("、") +
+        "</b>　→　强制项：FL2VA 首尾帧夹住 · 段长不超过 2.5 秒 · 单次不重复 · 中间锚点不超过 1 个 · 动作落在段前 40% 到 60%。";
+    } else {
+      why.innerHTML = "无需额外约束，可直接写进提示词。";
+    }
+  });
+
+  var sum = document.getElementById("summary");
+  if (!all.length){
+    sum.innerHTML = "<span class='empty' style='padding:0'>还没有动作。先从上面的速查库点一个，或添加空白一行。</span>";
+  } else {
+    sum.innerHTML =
+      "<span class='stat' style='color:#2C2C2A'>共 <b style='color:#2C2C2A'>" + all.length + "</b> 个动作</span>" +
+      "<span class='stat pass'>放行 <b>" + count.pass + "</b></span>" +
+      "<span class='stat cond'>需条件 <b>" + count.cond + "</b></span>" +
+      "<span class='stat deny'>否决 <b>" + count.deny + "</b></span>";
+  }
+
+  var gm = document.getElementById("gateMsg");
+  if (count.deny > 0){
+    gm.style.display = "block";
+    gm.className = "gate-msg block";
+    gm.textContent = "闸门② 未通过：有 " + count.deny + " 个动作被判否决。这些动作不许进提示词 —— 先改动作、改实拍或改后期，再回来重新过表。";
+  } else if (all.length){
+    gm.style.display = "block";
+    gm.className = "gate-msg ok";
+    gm.textContent = count.cond > 0
+      ? "闸门② 通过：无否决项。有 " + count.cond + " 个动作需条件 —— 派发时记得夹首尾帧、段长不超过 2.5 秒。"
+      : "闸门② 通过：全部放行，可以直接进提示词。";
+  } else {
+    gm.style.display = "none";
+  }
+}
+
+document.getElementById("addBlank").addEventListener("click", function(){ addRow(null); });
+document.getElementById("clearAll").addEventListener("click", function(){
+  rowsEl.innerHTML = "";
+  refresh();
+});
+
+document.getElementById("copyOut").addEventListener("click", function(){
+  var out = ["闸门② 动作判定结果", ""];
+  rowsEl.querySelectorAll(".row").forEach(function(el, i){
+    var desc = el.querySelector("input[type=text]").value.trim() || "（未填写）";
+    var r = verdict(readRow(el));
+    var line = (i+1) + ". " + desc + "　→　" + LABEL[r.v];
+    if (r.v === "deny"){
+      line += "（原因：" + r.hitRed.map(function(x){return x[1];}).join("、") + "）";
+    } else if (r.v === "cond"){
+      line += "（强制：首尾帧夹住 · ≤2.5s · 单次 · 锚点≤1）";
+    }
+    out.push(line);
+  });
+  var txt = out.join("\n");
+  var done = function(){ var b = document.getElementById("copyOut"); var old = b.textContent; b.textContent = "已复制"; setTimeout(function(){ b.textContent = old; }, 1400); };
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, function(){ fallbackCopy(txt, done); });
+  } else { fallbackCopy(txt, done); }
+});
+
+function fallbackCopy(txt, cb){
+  var ta = document.createElement("textarea");
+  ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); cb(); } catch(e){}
+  document.body.removeChild(ta);
+}
+
+addRow(LIB[0]);
+addRow(LIB[11]);
+addRow(LIB[20]);
+refresh();
+</script>
+</body>
+</html>

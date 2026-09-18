@@ -1,0 +1,5 @@
+Keep exactly the same camera angle, framing, scale, background, tabletop, lighting direction and colour grade as the input image. Keep the glass bottle in exactly the same position, same size, same upright pose, same label, unchanged.
+
+Change only one thing: add a woman's right hand with a cream ribbed knit sweater sleeve entering from the right side of the frame, reaching toward the bottle. The fingers are open and slightly curved, the hand is still short of the bottle — the fingertips are about one centimetre away from the right edge of the bottle body and have not touched it yet. The thumb is on the near side, angled down.
+
+Do not move or resize the bottle. Do not add any other object, text, logo or watermark. Do not change the background or the light.

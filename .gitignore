@@ -1,0 +1,33 @@
+# third-party repos (forked via git clone; pull updates via upstream)
+external_repos/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs / temp
+*.log
+*.tmp
+*.bak
+
+# Env / secrets
+.env
+.env.local
+*.key
+*.pem

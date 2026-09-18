@@ -1,0 +1,20 @@
+subject_definitions:
+<Subject 1> is the young woman in <Picture 1>, with long dark wavy hair, fair skin, soft natural makeup, wearing a fitted light-grey blazer over a white top.
+<Subject 2> is the round cushion compact in <Picture 2>, a rose-pink mirrored case with a pale pink puff resting inside.
+
+summary:
+[reference generation] The target video shows <Subject 1> presenting and using <Subject 2>, the rose-pink cushion compact, in a bright indoor setting. One continuous medium close-up follows her from lifting the open compact beside her face, to dabbing the puff on her cheek, to closing the case and smiling to camera while she delivers a single spoken line.
+
+retention_analysis:
+<Subject 1> (appears in [Shot 1]): fully_preserved - her face, long dark wavy hair, natural makeup, and the fitted light-grey blazer are retained.
+<Subject 2> (appears in [Shot 1]): fully_preserved - the round rose-pink case, its mirror, and the pale pink puff are retained.
+
+detailed_description:
+The target video uses a realistic live-action beauty-commercial style with soft bright indoor lighting, a clean neutral background, and shallow depth of field.
+[Shot 1] A medium close-up establishes <Subject 1>, the young woman with long dark wavy hair and a fitted light-grey blazer, standing against a clean neutral wall with her hand raised near her shoulder. She brings <Subject 2>, the round rose-pink cushion compact, up into frame at chest height with the lid open and the mirror facing her, and the camera pushes in slowly with small amplitude. She glances into the mirror and says in a clear, warm young female voice at an easy conversational pace, <d>[English] This cushion compact is my everyday base.</d> She closes her lips into a small smile, then lifts the pale pink puff with her free hand, brings it to her right cheek and presses it in two light dabs, blending a faint sweep of product into her skin. She lowers the puff back into the case, closes the rose-pink lid with a soft click, and holds the closed compact beside her cheek while keeping her eyes on the lens as the shot holds.
+
+overall_soundscape:
+Quiet indoor room tone throughout, with a light fabric rustle from her sleeve, a soft tap as the puff meets her cheek, and one clear click when the compact closes.
+
+non_diegetic_music:
+A light minimal synth pad at a slow tempo with a soft filtered pulse underneath, steady and without a swell.
