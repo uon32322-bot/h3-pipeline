@@ -1015,7 +1015,8 @@ class Orchestrator:
             log("S5", "   ⇒ 首帧会被 plain stretch 拉伸变形 / 尾帧会被 cover-crop 裁切 → 必须重出图片")
             raise CircuitBreak("S5 Gate-P P-07 未通过：首尾帧与画布 %s 不同比例" % CFG["img_size"])
         if self.dry:
-            log("S5", "  [dry] %d 项按通过处理（真实部署须接检测器；P-07 已真检）" % len(GATE_P_ITEMS))
+            log("S5", "  [dry] 仅 P-07 真检；P-01..P-06 未实现（na_stub），"
+                      "dry 模式下不作通过计数")
         _n_impl = sum(1 for _r in results.values() if _r.get("verdict") != "na_stub")
         _n_stub = len(results) - _n_impl
         if _n_stub:
