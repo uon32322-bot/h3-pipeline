@@ -73,8 +73,12 @@ for name in ("ttimg.py", "judge_shot.py"):
         check("T5 %s 存在" % name, False, "两处均未找到")
         continue
     src = path.read_text(encoding="utf-8")
-    ok = ("_lk888_key()" in src) and ('os.environ.get(\n    "LK888_KEY"' not in src) \
-         and ('os.environ.get("LK888_KEY"' not in src)
+    if "LK888_KEY" not in src:
+        # 该脚本根本不碰灵炫 Key（例如 nmb2 的 judge_shot.py 是判官编排器）——
+        # 只要没有明文常量即可，不强制它引入 h3secrets
+        check("T5 %s 不涉及灵炫 Key（仅校验无明文）" % rel, not SK.search(src))
+        continue
+    ok = ("_lk888_key()" in src) and not re.search(r'LK888_KEY"?\s*,\s*"sk-', src)
     check("T5 %s 已接入 h3secrets" % rel, ok)
 
 print()
