@@ -310,3 +310,69 @@ curl -s http://127.0.0.1:8900/health            # hao 上
 curl -s -X POST http://127.0.0.1:3000/api/ai/models -H 'Content-Type: application/json' \
   -d '{"providers":[{"name":"atlas-cloud","apiKey":"dummy"}]}' | head -c 300
 ```
+
+
+---
+
+## 9. 提示词对齐修正（2026-09-19 晚 · 三次纠错）
+
+> 本节记录一个**连续三轮才做对**的对齐过程，含两次方向性错误与纠正证据。
+
+### 9.1 目标
+
+把 ClipForge 生成的每镜 `prompt` 对齐 H3 官方提示词要求，并正确处理
+**人物真实度 LoRA 的触发词位置**。
+
+### 9.2 三次纠错
+
+| 轮次 | 我的做法 | 错在哪 | 纠正证据 |
+|---|---|---|---|
+| ① | 注入"官方三段式"（指令行 + `integrated_multimodal_description:` + `overall_soundscape:` + `non_diegetic_music:`） | **对齐错了节点**——三段式属于**单镜 I2VA/FL2VA 节点**的规范，而我们走的是 **Multishot 链式采样器**，两者不是同一代码路径 | ① `PROMPTING.md` 附带的 `example_script.txt` 是**自由叙述**（无任何标签）；② 一次**已验证成功**的 5 镜成片，其 script 实际形如 `Shot 1: <自由叙述> The narrator says in Chinese: … [background_audio] …`，**既无标签也无指令行** |
+| ② | 把 `true-to-life skin texture preserved, photorealistic real-person look, not CGI` 当作**触发词**，并要求放 `integrated_multimodal_description` **段尾** | 那串是**数字人模板里的画质描述短语**，**不是 LoRA 触发词**；位置也错（触发词必须在**开头**） | fal 官方 model card 原文：`Trigger word: r34l1sm` / *"Start the prompt with the trigger word `r34l1sm`, then describe the scene."* —— **辉哥凭记忆指出"应该是第一位"，核实后完全正确** |
+| ③ | 触发词写成 `r34l1sm`，但位置仍留在描述段开头 | 仍非"第一位"（前面还有指令行）；且 LLM 把已废弃的描述短语又抄了回来 | `prompts.ts:684` 残留了 ① 轮的旧文案（含那串短语 + "放段末尾"），LLM 照着抄 → 一并清除 |
+
+### 9.3 最终规范（已落地 `prompts.ts` 的 `H3_PROMPT_SPEC`）
+
+```
+每镜 prompt = 「r34l1sm, 」+ 一段英文自由叙述
+
+叙述顺序：相机与构图 → 风格与画质 → 人物完整外观 → 场景与道具细节 → 本镜动作 → 台词 → 收尾状态
+台词写法：and says in Chinese: "……"     环境音：[background_audio] ...
+```
+
+**六条禁止项**（全部来自实测事故）：
+1. 禁否定句（`no X` / `does not move`）—— CFG=1.0 无负向分支，否定会把概念喂给模型
+2. 禁静止短语（`goes still` / `exactly as they were`）—— 会冻结整帧
+3. 禁扩散模型标签（`cinematic` / `8k` / `masterpiece`）
+4. 禁绝对位置与占比（`at frame LEFT` / `occupies 30%`）
+5. 禁在镜边界改变场景（会出双人/双道具）
+6. 禁画面内文字（除非该镜就是文字卡）
+
+**镜间一致性铁律**：每镜**逐字重复**人物完整外观 + 场景光线描述（改写 = 中途换脸）。
+
+### 9.4 同步修掉的另两个缺陷
+
+| # | 缺陷 | 修法 |
+|---|---|---|
+| 1 | `visualSource="product_image"` 的镜**省略 prompt** → 实测 5/7 镜无画面描述 | prompt 改为**每镜必填**（product_image 只决定首帧来源，H3 仍需画面描述） |
+| 2 | 第一行与正文**缺空行** | 规范中明确要求 |
+
+### 9.5 验证结果（三轮后）
+
+```
+复测 7 镜：r34l1sm首位=✅×7   无标签=✅×7   无指令行=✅×7   缺失prompt=0/7
+```
+
+落地 sample：
+```
+r34l1sm, A static camera frames a white wireless earbud charging case from a high angle on a
+dark grey marble tabletop; live-action, shallow depth of field, fine 35mm grain. ...
+[background_audio] quiet indoor studio, a soft whoosh, then stillness
+```
+
+### 9.6 教训
+
+- **对齐前先确认目标节点/代码路径**：H3 生态里"单镜 I2VA/FL2VA 节点"与"Multishot 链式采样器"的 prompt 规范**不同**，套错等于没对齐。
+- **"已验证成功的成片"是最强证据源**：与其推演规范，不如直接读跑通过的 script 原貌。
+- **LoRA 触发词以官方 model card 为准**，不要在自家代码里"认领"看起来像触发的短语。
+- **改 prompt 规范后必须清残留**：同一文件里旧文案会继续被 LLM 抄走（本次 684 行残留导致第 ②→③ 轮返工）。
