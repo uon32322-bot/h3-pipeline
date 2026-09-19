@@ -217,7 +217,69 @@ DeepSeek 写脚本 ≈ ¥0.001/次；按 100 条/天估算 ≈ **¥3/月**。
 
 ---
 
-## 7. 已知问题 / 待办
+## 7. 端到端验证结果（2026-09-19 16:5x）
+
+### 7.1 DeepSeek ✅ 生效
+
+```
+POST /api/ai/... /api/llm/script   {"productName":"无线蓝牙耳机", ...}
+→ HTTP 200 | 15.7s
+→ {"scripts":[{"title":"降噪耳机天花板","styleType":"pain_point","totalDuration":28,
+   "shots":[{"shotId":1,"type":"hook","duration":3,
+             "description":"地铁车厢内，主角戴着无线蓝牙耳机...",
+             "camera":"镜头急速推近主体，冲击力强，开场抓眼",
+             "voiceover":"地铁上吵到崩溃？这副耳机一戴，世界瞬间安静。",
+             "prompt":"Close-up of a young Asian man wearing wireless earbuds..."},
+            ...]}]}
+```
+
+**脚本结构完全匹配 H3 需求**：每镜含
+`prompt`（英文，可直接喂 H3）/ `voiceover`（中文旁白）/ `camera`（运镜）/ `duration` / `visualSource`。
+
+### 7.2 视频路由 ✅ 无 UI 配置可用
+
+改造 `api/ai/video/route.ts` 用**带默认值的解构**（`provider` / `model` / `apiKey` 三项 env 兜底），
+一次覆盖全部下游使用点（`createProvider`、`modelId`、`ai_tasks` 记录）。
+
+**验证**：不带 provider / model / apiKey 调用 → 请求抵达 Bridge（Bridge 日志出现对应 task），
+证明链路通、不再被"缺少 API Key"拦截。
+
+### 7.3 发现并修复：Bridge 缺 model 校验 ⚠️
+
+**问题**：Bridge 接受**任意** model 字符串并提交 ComfyUI。
+探针用 `__probe_nonexistent__` 时被接受 → **占用一个 GPU 队列位**（ComfyUI 串行，会白跑 30 分钟）。
+
+**修复**（`patch_bridge_model_guard.py`）：
+```python
+def _resolve_model(name):        # 未知 → None → 400 拒绝
+    if name in _KNOWN_MODELS: return name
+    if "h3" in name.lower():      # UI 变体容错：按 text/image/reference 归一化
+        return 对应本地模式
+    return None
+```
++ `generateVideo` 入口校验，未知 model 直接 `HTTPException(400)`，**不触碰队列**。
+
+**已清理**：被误提交的探针任务已从 ComfyUI 队列删除（`POST /queue {"delete":[...]}`）。
+
+### 7.4 已知缺口（下一步）
+
+| # | 缺口 | 说明 |
+|---|---|---|
+| 1 | **逐镜 vs 多镜模式** | ClipForge 是**逐镜调用**（每 shot 一次 `/api/ai/video`），Bridge 当前是**多镜一次生成**（`H3MultishotSampler`）。需确认单镜路径（无 `Shot N:` 标记时 `n_shots=1`，Bridge 已天然支持） |
+| 2 | **首帧传递** | ClipForge 传 `imageUrl`/`lastImageUrl`（关键帧链接），Bridge 尚未接到 H3 的 first_frame 输入 |
+| 3 | **单镜时长** | ClipForge 每镜 3–8s，Bridge 当前固定 192 帧（8s），需支持按 `duration` 换算帧数 |
+| 4 | 图片生成 route | `/api/ai/image` 同样有 apiKey 守卫（本次只改了 video） |
+
+### 7.5 运维注意
+
+- ⚠️ `ssh -t hao '... && bash /root/cf_start.sh'`：**伪终端退出会带走子进程**（ClipForge 被 SIGHUP）。
+  正确重启方式：`ssh -T hao 'bash /root/cf_start.sh'`（`-T` 禁用伪终端）
+- Bridge 重启会**清空内存态 TASKS**（进行中的任务将无法查询，但产物仍在输出目录）
+  → 改 Bridge 代码后，**等当前任务跑完再重启**。
+
+---
+
+## 8. 已知问题 / 待办
 
 | # | 项 | 状态 |
 |---|---|---|
