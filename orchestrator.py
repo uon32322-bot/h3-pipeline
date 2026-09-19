@@ -54,6 +54,8 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+FFMPEG = os.environ.get("FFMPEG", "ffmpeg")
+FFPROBE = os.environ.get("FFPROBE", "ffprobe")
 
 
 def _resolve(name: str) -> Path:
@@ -278,7 +280,8 @@ class Job:
 class Segment:
     idx: int
     seconds: float
-    prompt: str
+    prompt: str                   # 图像层叙述（喂 TT Image2 生成首尾帧）
+    h3_prompt: str = ""           # 视频层提示词（喂 H3），与 prompt 分家
     first: str = ""
     last: str = ""
     mids: list[tuple[str, float]] = field(default_factory=list)
@@ -361,7 +364,8 @@ class Orchestrator:
     def h3_generate(self, seg: Segment, prefix: str) -> str | None:
         """H3 官方原生链路（3090，:6011）"""
         pf = self.out / "prompt" / ("seg%d.txt" % seg.idx)
-        pf.write_text(seg.prompt, encoding="utf-8")
+        # 视频层用 h3_prompt（ClipForge 产出的 H3 提示词）；缺省才回落场景叙述
+        pf.write_text(seg.h3_prompt or seg.prompt, encoding="utf-8")
         if self.dry:
             log("S6", "[dry] H3 seg%d seed=%d → %s" % (seg.idx, seg.seed, prefix))
             return str(self.out / "video" / (prefix + "_%06d_.mp4" % seg.seed))
@@ -558,7 +562,9 @@ class Orchestrator:
                 else:
                     at = sum(x["seconds_snapped"] for x in g[:k])
                     lines.append("[Shot %d] At 00:%06.3f %s" % (k + 1, at, r["visual"]))
-            segs.append(Segment(idx=gi, seconds=total, prompt="\n".join(lines)))
+            h3_lines = [r.get("h3_prompt", "").strip() for r in g if r.get("h3_prompt", "").strip()]
+            segs.append(Segment(idx=gi, seconds=total, prompt="\n".join(lines),
+                                h3_prompt="\n\n".join(h3_lines)))
         log("S3.5", "分组：%d 镜 → %d 段（S=%d；平均段长 %.2fs，上限 %.0fs）" % (
             len(rows), len(segs), len(segs),
             sum(s.seconds for s in segs) / max(len(segs), 1), CFG["seg_max_seconds"]))
@@ -603,12 +609,20 @@ class Orchestrator:
         # 4c 每【段】首帧 → 尾帧（段内串行保证同源；不同段之间并行）
         base = paths.get("main") or str(master)
 
+        # 身份强化参考：母版已含模特/产品，但实测「双参考（模特图+产品图）」对
+        # 人物身份与产品语义的保持显著更强。顺序即优先级：锚图在前（构图/场景/光线），
+        # 模特图与产品图在后（身份/形态）。
+        identity_refs = [str(x) for x in (model_ref + prod_ref) if x]
+
         def build_segment(seg: Segment) -> bool:
             first = self.out / "img" / ("seg%d_first.png" % seg.idx)
             last = self.out / "img" / ("seg%d_last.png" % seg.idx)
-            if not self.tt_img(first, CFG["img_size"], "start state: %s" % seg.prompt, [base]):
+            # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
+            if not self.tt_img(first, CFG["img_size"], "start state: %s" % seg.prompt,
+                               [base] + identity_refs):
                 return False
-            if not self.tt_img(last, CFG["img_size"],
+            # 尾帧：必须从首帧同源派生（跨源会显著掉落点精度）
+            if self.tt_img(last, CFG["img_size"],
                                "end state, same subject and background: %s" % seg.prompt,
                                [str(first)]):
                 return False
@@ -618,8 +632,8 @@ class Orchestrator:
         with cf.ThreadPoolExecutor(max_workers=max(len(segments), 1)) as ex:
             oks = list(ex.map(build_segment, segments))
         self.segments = [s for s, ok in zip(segments, oks) if ok]
-        log("S4", "镜像帧就绪：%d/%d 段（%d 张图 = 3 锚 + 段数×2）" % (
-            len(self.segments), len(segments), 3 + len(segments) * 2))
+        log("S4", "镜像帧就绪：%d/%d 段（%d 张图 = 母版 + 3 锚 + 段数×2；身份参考 %d 张）" % (
+            len(self.segments), len(segments), 4 + len(segments) * 2, len(identity_refs)))
         if not self.segments:
             raise CircuitBreak("S4 图像层全部失败 → 熔断，不进入 GPU")
         self.save_state("S4")
@@ -740,11 +754,106 @@ class Orchestrator:
             return {"pass": True, "type": "parse_error", "redraw": True, "hidden": True}
 
     # ---------- S8 / S9 ----------
+    # ---------- S8 拼接工具 ----------
+    @staticmethod
+    def _has_audio(path: str) -> bool:
+        try:
+            p = json.loads(subprocess.run(
+                [FFPROBE, "-v", "error", "-print_format", "json",
+                 "-show_streams", "-select_streams", "a", path],
+                capture_output=True, text=True, timeout=20).stdout)
+            return bool(p.get("streams"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _duration(path: str) -> float:
+        try:
+            p = json.loads(subprocess.run(
+                [FFPROBE, "-v", "error", "-print_format", "json", "-show_format", path],
+                capture_output=True, text=True, timeout=20).stdout)
+            return float(p["format"]["duration"])
+        except Exception:
+            return 0.0
+
     def s8_post(self) -> str:
-        log("S8", "后期合成（拼接 + 中文 TTS + 图文叠加 + 合规标识）")
+        """后期合成：多段拼接（丢重复帧 + 40ms 等功率音频焊接）。
+
+        逐镜 FL2VA 每次只产一段（官方：FL2VA favors a single shot），
+        因此**拼接是这条架构的必经环节，不是可选项**：
+          - 镜 i 的尾帧 == 镜 i+1 的首帧（两块板之间插值）⇒ 每个接缝必须丢 1 帧，
+            否则成片在接缝处「顿一下」；
+          - 段间音频用 40ms acrossfade 等功率焊接 ⇒ 避免爆音，也避免接缝静音空档。
+        注：口播音频由 H3 原生生成（音视频一体），此处不做 TTS 替换。
+        """
         out = self.out / "video" / "final.mp4"
         if self.dry:
             out.write_bytes(b"")
+            log("S8", "[dry] 跳过拼接")
+            return str(out)
+
+        segs = [s for s in self.segments if s.video and Path(s.video).exists()]
+        if not segs:
+            raise CircuitBreak("S8 无可用段视频 ⇒ 拒绝产出空成片")
+        log("S8", "后期合成：%d 段拼接 + 音频焊接" % len(segs))
+
+        if len(segs) == 1:
+            shutil.copy2(segs[0].video, out)
+            log("S8", "仅 1 段，直接落地 → %s（%.2fs）" % (out, self._duration(segs[0].video)))
+            self.state["final"] = str(out)
+            self.save_state("S8")
+            return str(out)
+
+        has_audio = all(self._has_audio(x.video) for x in segs)
+        if not has_audio:
+            log("S8", "⚠️ 存在缺音频流的段 → 本次只拼视频（成片将无声）")
+
+        fc, vs, auds = [], [], []
+        for i, _seg in enumerate(segs):
+            if i == 0:
+                fc.append("[%d:v]setpts=PTS-STARTPTS[v%d]" % (i, i))
+            else:
+                # 丢首帧：与上一段的尾帧重复
+                fc.append("[%d:v]trim=start_frame=1,setpts=PTS-STARTPTS[v%d]" % (i, i))
+            vs.append("[v%d]" % i)
+            auds.append("[%d:a]" % i)
+        fc.append("%sconcat=n=%d:v=1:a=0[vout]" % ("".join(vs), len(segs)))
+
+        if has_audio:
+            prev = auds[0]
+            for i in range(1, len(segs)):
+                tag = "aw%d" % i
+                fc.append("%s%sacrossfade=d=0.040:c1=tri:c2=tri[%s]" % (prev, auds[i], tag))
+                prev = "[%s]" % tag
+            fc.append("%sasetpts=PTS-STARTPTS[aout]" % prev)
+
+        cmd = [FFMPEG, "-y"]
+        for x in segs:
+            cmd += ["-i", x.video]
+        cmd += ["-filter_complex", ";".join(fc), "-map", "[vout]"]
+        if has_audio:
+            cmd += ["-map", "[aout]", "-c:a", "aac", "-b:a", "192k"]
+        else:
+            cmd += ["-an"]
+        cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "16",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
+
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0 or not out.exists():
+            raise CircuitBreak("S8 拼接失败：%s" % ((r.stderr or "")[-400:]))
+
+        dur = self._duration(str(out))
+        raw = sum(self._duration(x.video) for x in segs)
+        # 丢帧数校验：丢 (段数-1) 帧 @24fps ≈ 0.0417s×(段数-1)
+        expect = raw - (len(segs) - 1) / CFG["fps"]
+        drift = abs(dur - expect)
+        log("S8", "✅ 拼接完成：%d 段 %.2fs → %.2fs（丢 %d 帧去重，音频 %dms 焊接，偏差 %.3fs）"
+            % (len(segs), raw, dur, len(segs) - 1, (len(segs) - 1) * 40, drift))
+        if drift > 0.25:
+            log("S8", "⚠️ 时长偏差 %.3fs 偏大（期望 %.2fs）→ 请核对接缝丢帧" % (drift, expect))
+        self.state["final"] = {"path": str(out), "duration": dur, "segments": len(segs),
+                               "dropped_frames": len(segs) - 1, "audio_welded": has_audio}
+        self.save_state("S8")
         return str(out)
 
     def s9_archive(self) -> None:
