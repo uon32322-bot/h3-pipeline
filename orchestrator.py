@@ -278,8 +278,11 @@ def _check_segments_ratio(segments, canvas, tol=0.02):
     返回 (是否全绿, 问题清单)。图片不存在时跳过（不误报）。"""
     try:
         from PIL import Image
-    except Exception:
-        return True, ["PIL 不可用，P-07 仅做人工勾选"]
+    except Exception as _pe:
+        # 🔴 不得把「没校验」当「通过」：P-07 是唯一 100% 可自动化、无需判官的
+        #    静默毁片防线（首帧被 plain stretch 拉伸、尾帧被 cover-crop 裁切，
+        #    H3 全程不报错）。服务器上少一个 Pillow 就全线失效，而日志只会显示正常。
+        return False, ["PIL 不可用（%s）⇒ P-07 无法执行，视为**未通过**；装 Pillow 后重跑" % _pe]
     tw, th = (int(v) for v in canvas.split("x"))
     bad = []
     for s in segments:
@@ -341,7 +344,7 @@ def snap_frames(seconds: float, fps: int = 24) -> int:
     return f + (5 - (f % 17)) % 17
 
 
-def parse_h3_output(stdout: str, comfy_out, prefix: str):
+def parse_h3_output(stdout: str, comfy_out, prefix: str, not_before: float = 0.0):
     """从 test_fl2v_official 的 stdout 解析出产物【绝对路径】。
 
     ⚠️ 它打印的是 `OUTPUT <key> <subfolder> <filename>`（4 段）；
@@ -360,10 +363,20 @@ def parse_h3_output(stdout: str, comfy_out, prefix: str):
             break
     if out is None:
         stamp = Path(prefix).name
-        cands = sorted(Path(comfy_out).rglob(stamp + "*.mp4"),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
+        # 🔴 2026-09-20 修复：兜底必须限定「本次提交之后」产出。
+        #    原实现按 mtime 取最新且无时间界，而 comfy_out 是跨 job 共享目录、
+        #    前缀只含段号 ⇒ 本次提交未产出任何文件时，会把上一次尝试、甚至上一个
+        #    job 留下的同名旧视频当成本轮产物 ⇒ seed 与画质脱钩、抽卡经验被污染。
+        cands = [c for c in Path(comfy_out).rglob(stamp + "*.mp4")
+                 if c.is_file() and c.stat().st_mtime >= not_before]
         if cands:
+            cands.sort(key=lambda q: q.stat().st_mtime, reverse=True)
             out = str(cands[0])
+        else:
+            log_once = Path(comfy_out).rglob(stamp + "*.mp4")
+            if any(True for _ in log_once):
+                print("   ⚠️ 兜底发现同名旧产物但 mtime 早于本次提交（%s）⇒ 判为未产出，拒绝旧货"
+                      % stamp)
     return out
 
 
@@ -561,12 +574,23 @@ class Orchestrator:
         for img, sec in seg.mids:
             st = self._stage_one(Path(img), "mid%d_%s" % (seg.idx, sec))
             cmd += ["--mid", "%s@%s" % (st or img, sec)]
+        _t_submit = time.time()
         r = subprocess.run(cmd, capture_output=True, text=True)
+        # 🔴 rc 有语义，不得一律折叠成「随机失败」。test_fl2v_official.py：
+        #    2 = 首尾帧比例守卫否决（**确定性**，重抽必然同样失败）
+        #    3 = GPU 租约获取失败（资源问题，不该消耗抽卡次数）
+        if r.returncode == 2:
+            raise CircuitBreak(
+                "段%d H3 rc=2：首尾帧比例守卫否决（确定性失败，非抽卡运气）——重抽无用。"
+                " 须按画布 %s 重出图片。尾部输出：%s"
+                % (seg.idx, CFG["img_size"], ((r.stdout or "") + (r.stderr or ""))[-300:]))
+        if r.returncode == 3:
+            log("S6", "⚠️ 段%d H3 rc=3：GPU 租约获取失败（资源问题，非画质问题）" % seg.idx)
         if r.returncode != 0:
-            log("S6", "⚠️ H3 失败：%s" % (r.stdout or r.stderr)[-400:])
+            log("S6", "⚠️ H3 失败（rc=%d）：%s" % (r.returncode, (r.stdout or r.stderr)[-400:]))
             return None
         out = parse_h3_output(r.stdout, CFG.get("comfy_output_dir", "/root/autodl-tmp/h3p/output"),
-                              prefix)
+                              prefix, not_before=_t_submit)
         if out is None:
             log("S6", "⚠️ H3 执行完成但未找到产物；stdout 尾部：%s" % ((r.stdout or "")[-300:]))
         else:
@@ -597,7 +621,9 @@ class Orchestrator:
         失败一律 CircuitBreak（禁止静默续跑）。
         P3 闸门**默认只告警**（新门禁须先用已验收成片标定）；params.gate_p3_strict=True 才阻断。
         """
-        adapter = HERE / "clipforge_adapter.py"
+        # HERE 随 orchestrator.py 的落位而变（本地在仓库根 / 生产在 scripts/），
+        # 用 _resolve 双路径兜底，避免「一边能跑一边熔断」。
+        adapter = _resolve("clipforge_adapter.py")
         if not adapter.exists():
             raise CircuitBreak("S1 找不到 clipforge_adapter.py（%s）" % adapter)
         p = self.job.params or {}
@@ -639,15 +665,23 @@ class Orchestrator:
                 log("S1", "候选%d 失败 rc=%d：%s"
                     % (k, r.returncode, ((r.stdout or r.stderr) or "")[-200:]))
                 continue
-            gate_f = Path(str(cand_out).replace(".json", ".gate.json"))
-            gate = {}
+            # ⚠️ 用 with_suffix 而非无界 replace：outdir 若含 ".json" 子串会被整段改写
+            gate_f = Path(str(cand_out)).with_suffix("").with_suffix(".gate.json")
+            gate = None
             if gate_f.exists():
                 try:
                     gate = json.loads(gate_f.read_text(encoding="utf-8"))
-                except Exception:
-                    gate = {}
-            score = tuple(gate.get("score") or [len(gate.get("errors", [])),
-                                                len(gate.get("warnings", []))])
+                except Exception as _ge:
+                    log("S1", "⚠️ 候选%d gate 文件解析失败: %s" % (k, _ge))
+            # 🔴 2026-09-20 修复：gate 缺文件/解析失败 ⇒ 置**最差分**。
+            #    原实现回落 gate={} ⇒ score=[0,0] ⇒ 反而得满分、被 min() 选为最优，
+            #    择优机制被反向污染（且日志显示 errors=0 warnings=0 看着完全正常）。
+            if not isinstance(gate, dict):
+                score = (10 ** 6, 10 ** 6)
+                log("S1", "⚠️ 候选%d 无可用 gate 评分（%s）→ 置最差分" % (k, gate_f.name))
+            else:
+                score = tuple(gate.get("score") or [len(gate.get("errors", [])),
+                                                    len(gate.get("warnings", []))])
             cands.append({"k": k, "gate": gate, "score": score,
                           "data": json.loads(cand_out.read_text(encoding="utf-8"))})
             log("S1", "候选%d 评分 errors=%d warnings=%d" % (k, score[0], score[1]))
@@ -961,9 +995,16 @@ class Orchestrator:
         log("S5", "★闸门P 图层校验（Mac CPU，小图秒级）")
         results = {}
         for pid, name in GATE_P_ITEMS:
-            # 真实实现：复用 align.py（产品对齐）/ frames.py（同源 MAE）/ refcheck.py（ROI 相似）
-            #           + 人脸嵌入（CPU）+ OCR（paddleocr）
-            results[pid] = {"name": name, "verdict": "yes", "evidence": None}
+            # ⛔ 2026-09-20 审计确认：P-01..P-06 **尚未实现**。原代码无条件写
+            #    verdict="yes"，并在下方打印「✅ Gate-P 7/7 通过」—— 这是**假闸门**：
+            #    文件头承诺的「产品保真/模特一致/规格合规/异文字水印/首尾同源/状态单调」
+            #    六项一项没做，却给出全绿结论并写进 report/gate_p.json，下游会把
+            #    「7/7 通过」当成已校验证据。
+            #    现改为显式 na_stub 且**不计入通过数**。
+            #    待接：align.py（产品对齐）/ frames.py（同源 MAE）/ refcheck.py（ROI 相似）
+            #          + 人脸嵌入（CPU）+ OCR（paddleocr）
+            results[pid] = {"name": name, "verdict": "na_stub", "evidence": None,
+                            "reason": "未实现：无检测器接线，不得当作已校验"}
         # ★P-07 画布比例一致：唯一可 100% 自动化、无需判官的一项 —— 必须真检（静默毁片防线）
         ok, bad = _check_segments_ratio(self.segments, CFG["img_size"])
         results["P-07"] = {"name": "画布比例一致", "verdict": "yes" if ok else "no",
@@ -975,8 +1016,15 @@ class Orchestrator:
             raise CircuitBreak("S5 Gate-P P-07 未通过：首尾帧与画布 %s 不同比例" % CFG["img_size"])
         if self.dry:
             log("S5", "  [dry] %d 项按通过处理（真实部署须接检测器；P-07 已真检）" % len(GATE_P_ITEMS))
-        log("S5", "✅ Gate-P %d/%d 通过（画布 %s，重出上限 %d 轮）"
-            % (len(results), len(GATE_P_ITEMS), CFG["img_size"], CFG["gate_p_rounds"]))
+        _n_impl = sum(1 for _r in results.values() if _r.get("verdict") != "na_stub")
+        _n_stub = len(results) - _n_impl
+        if _n_stub:
+            log("S5", "⚠️ Gate-P 真实覆盖 %d/%d 项；其余 %d 项 = na_stub（**未校验**，"
+                      "不得视为通过）。待接 align/frames/refcheck/人脸/OCR"
+                % (_n_impl, len(results), _n_stub))
+        log("S5", "✅ Gate-P 已检 %d/%d 通过（画布 %s）%s"
+            % (_n_impl, len(results), CFG["img_size"],
+               ("；另有 %d 项未实现" % _n_stub) if _n_stub else ""))
         # 像素级硬约束（禁1）
         if self.job.fidelity_class == "像素级":
             log("S5", "ℹ️ 像素级产品：图中产品像素必须全部来自用户原图（P-01 严格档）")
@@ -1054,28 +1102,46 @@ class Orchestrator:
 
         # 调 judge_shot.py（warn_only=True = 不阻塞）
         judge_script = Path(__file__).parent / "judge_shot.py"
+        # L2 判官的 R 段判据来自该镜 prompt 原文；S6 已把每段 h3_prompt 写到
+        # out/prompt/segN.txt。缺文件时 judge_shot 会自动跳过 L2 并告警。
+        seg_prompt = self.out / "prompt" / ("seg%d.txt" % seg.idx)
+        # L2 需 1.5–3 min/段（17 项 × 3 票 / workers=4）⇒ 原写死的 120s 必然超时，
+        # 等于永远拿不到 L2 结果。L2 关闭时才沿用 120s。
+        _l2_on = str(os.environ.get("H3P_JUDGE_L2", "auto")).lower() != "off"
+        judge_timeout = int(CFG.get("judge_timeout_s", 900 if _l2_on else 120))
+        judge_cmd = [sys.executable, str(judge_script),
+                     seg.video, str(w), str(h), str(nb_frames), "24", str(seg.seconds)]
+        if seg_prompt.exists():
+            judge_cmd += ["--prompt", str(seg_prompt)]
         try:
-            r = subprocess.run(
-                [sys.executable, str(judge_script),
-                 seg.video, str(w), str(h), str(nb_frames), "24", str(seg.seconds)],
-                capture_output=True, text=True, timeout=120
-            )
+            r = subprocess.run(judge_cmd, capture_output=True, text=True,
+                               timeout=judge_timeout)
+            # 🔴 判官没跑成 ≠ 判过了。以下分支一律 pass=False：warn_only 下不影响出片，
+            #    但统计与人工复核能看出真相。历史教训：这些分支曾返回 pass=True，
+            #    与「真判过且合格」完全无法区分。
             if r.returncode != 0:
-                log("S7", "⚠️ 段%d 判官执行失败 (rc=%d): %s" % (seg.idx, r.returncode, r.stderr[:200]))
-                return {"pass": True, "type": "judge_error", "redraw": True, "hidden": True,
-                        "reason": "judge_shot rc=" + str(r.returncode)}
+                log("S7", "⚠️ 段%d 判官执行失败 (rc=%d): %s" % (seg.idx, r.returncode, r.stderr[-300:]))
+                return {"pass": False, "type": "judge_error", "redraw": True, "hidden": True,
+                        "structural": False, "reason": "judge_shot rc=" + str(r.returncode)}
             result = json.loads(r.stdout)
             s = result.get("summary", {})
-            log("S7", "段%d 判官: pass=%s yes=%d no=%d na=%d structural=%d warn_only=%s" % (
-                seg.idx, result.get("pass"), s.get("yes", 0), s.get("no", 0),
-                s.get("na", 0), s.get("structural_count", 0), result.get("warn_only", False)))
+            lm = result.get("l2_meta", {}) or {}
+            log("S7", "段%d 判官: pass=%s raw_pass=%s yes=%d no=%d na=%d structural=%d "
+                      "L2=%d项 l2_status=%s warn_only=%s" % (
+                seg.idx, result.get("pass"), result.get("raw_pass"), s.get("yes", 0),
+                s.get("no", 0), s.get("na", 0), s.get("structural_count", 0),
+                s.get("l2_items", 0),
+                (lm.get("l2_error") or lm.get("l2_skipped") or "ok"),
+                result.get("warn_only", False)))
             return result
         except subprocess.TimeoutExpired:
-            log("S7", "⚠️ 段%d 判官超时 120s, 跳过" % seg.idx)
-            return {"pass": True, "type": "timeout", "redraw": True, "hidden": True}
+            log("S7", "⚠️ 段%d 判官超时 %ds → 判为「未判成」(pass=False)" % (seg.idx, judge_timeout))
+            return {"pass": False, "type": "timeout", "redraw": True, "hidden": True,
+                    "structural": False}
         except json.JSONDecodeError as e:
             log("S7", "⚠️ 段%d 判官输出解析失败: %s, stdout=%s" % (seg.idx, e, r.stdout[:200]))
-            return {"pass": True, "type": "parse_error", "redraw": True, "hidden": True}
+            return {"pass": False, "type": "parse_error", "redraw": True, "hidden": True,
+                    "structural": False}
 
     # ---------- S8 / S9 ----------
     # ---------- S8 拼接工具 ----------

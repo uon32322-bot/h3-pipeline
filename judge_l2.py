@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# ⚠️⚠️ 这是 judge_l2.py（L2 判官实现），**不是** judge_shot.py（判官编排器）！
+#
+#   2026-09-20 由 judge_shot.py 更名而来 —— 原因是**同名两份文件长期共存**
+#   且语义完全不同（本文件 = 逐镜 L2 执行器，734 行；scripts/judge_shot.py =
+#   L0/L1/A 聚合编排器，176 行），此前已导致一次「误推覆盖生产判官」事故。
+#   ⇒ 名字必须唯一，禁止再改回 judge_shot.py。
+#
+#   生产调用链：orchestrator.s7_judge → scripts/judge_shot.py（编排器）
+#                                      → 本文件 l2() （L2 VLM 判官）
+#   密钥：走 h3secrets.lk888_key()（fail-closed，禁止硬编码）
+# ============================================================================
+
 # -*- coding: utf-8 -*-
 """judge_shot.py —— 判官团「逐镜评分」执行器（L0 算术 + L1 本地 + L2 远端 VLM）
 
@@ -78,7 +90,7 @@ ITEMS = {
     #    这是**判据缺陷**不是片子缺陷：该镜的意图是"正确产品出现且看得清"。
     #    ⇒ 改为问"描述里的鞋是否出现且清晰可见（无论穿在脚上还是单独出现）"，
     #      仍然是否定即否决的硬判据（鞋若错/缺失照样判 no）。
-    "R-01": "The sneakers stated in the shot description (black and white engineered-mesh running sneakers) are present in the frames and clearly visible, whether worn on the model's feet or shown by themselves.",
+    "R-01": "The product stated in the shot description is present in the frames and clearly visible, whether it is worn, held, or shown by itself.",
     "R-02": "The scene or background stated in the shot description is actually present in the frames.",
     "R-03": "The specific action or motion stated in the shot description actually happens in the frames.",
     "R-04": "Every on-screen text line visible in the frames matches the text stated in the shot description word for word. Answer na if the shot description declares no on-screen text and none is visible.",
@@ -559,14 +571,20 @@ def l2(path, shot_prompt, segs, n_frames=6, workers=4, think=False, votes=3):
         top = max(cnt, key=lambda v: cnt[v])
         confs = [r["confidence"] for r in vs if r["verdict"] == top]
         best = next((r for r in vs if r["verdict"] == top and r["frame"] is not None), vs[0])
+        # ⚠️ 2026-09-20 修复：必须把「调用失败」传上去。原实现把 _error 丢在 one_vote 里，
+        #    上层只看到 na ⇒ 无法区分「判官说不适用」和「VLM 调用挂了」。
+        err_votes = sum(1 for r in vs if r.get("error"))
+        all_err = err_votes == len(vs)
         out.append({
             "id": iid, "verdict": top,
             "evidence": {"frame": best.get("frame"), "region": best.get("region"),
-                         "value": None, "threshold": None},
+                         "value": "error" if all_err else None, "threshold": None},
             "confidence": ("low" if cnt[top] * 2 <= len(vs) else
                            ("high" if "high" in confs else "medium")),
             "votes": "%d/%d (%s)" % (cnt[top], len(vs),
                                      ",".join(r["verdict"] for r in vs)),
+            "error_votes": err_votes,
+            "error": (best.get("error") if all_err else None),
         })
         print("   L2 %-5s %-3s  票 %s" % (iid, top, out[-1]["votes"]), flush=True)
     return out
