@@ -151,17 +151,69 @@ ComfyUI log: [H3Multishot] shot 1/5 (192f @ 720x1280)
 
 ---
 
-## 6. DeepSeek 接入（无需改代码）
+## 6. DeepSeek 接入（已改造：支持服务器 env 兜底）
 
-ClipForge 的 LLM 层是 **OpenAI 兼容**（`src/lib/llm-models.ts: listModels(baseUrl, apiKey)`），
-且 `src/lib/llm-presets.ts` **已内置 DeepSeek 预设**：
+### 6.1 原始情况
+
+ClipForge 的配置由 `zustand + persist` 存进**浏览器 localStorage**：
 
 ```
-label: "DeepSeek"   baseUrl: "https://api.deepseek.com"
+src/lib/stores/settings-store.ts:
+   import { persist } from "zustand/middleware"
+   llm: { provider, baseUrl, apiKey, model, visionModel }
 ```
 
-**配置路径**：ClipForge → 设置 → LLM → 选 DeepSeek → 填 API Key → 完成。
-（连通性已测：hao → api.deepseek.com 返回 401 = 网络通、需 Key）
+⇒ **服务器端拿不到也改不了**，只能由用户在浏览器 UI 里配。
+
+### 6.2 改造（本次）：DEEPSEEK_* env 兜底
+
+**动机**：单用户私有部署下，让服务器 `.env.local` 成为权威配置源，
+不依赖浏览器 localStorage（换浏览器/清缓存就丢配置）。
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `src/lib/script-engine/generator.ts` | 新增 `withLLMEnvFallback()`，在 `generateScript` / `generateScriptStream` / `analyzeProduct` 三个入口应用 |
+| 2 | 6 个 LLM route | "缺少 LLM 配置"守卫加 `&& !process.env.DEEPSEEK_API_KEY` 逃生口 |
+
+**6 个 route**：`llm/script`、`llm/publish`、`topic/script`、`ad-template/generate`、
+`project/[id]/script-judge`、`project/[id]/dub`
+
+**兜底逻辑**（`withLLMEnvFallback`）：
+```ts
+apiKey  ← config.apiKey      || process.env.DEEPSEEK_API_KEY
+baseUrl ← config.baseUrl     || process.env.DEEPSEEK_BASE_URL || https://api.deepseek.com
+model   ← config.model       || process.env.DEEPSEEK_MODEL     || deepseek-chat
+```
+**优先级**：浏览器 UI 配置 > 服务器 env > 内置默认值。
+
+### 6.3 `.env.local`
+
+```
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+# DEEPSEEK_API_KEY 由 `set_deepseek_key.sh` 交互式写入（read -s，不回显/不进 history）
+```
+
+### 6.4 Key 注入方式（安全）
+
+```bash
+ssh -t hao 'bash /root/set_deepseek_key.sh && bash /root/cf_start.sh'
+```
+脚本用 `read -s` 读取 Key → 追加进 `.env.local`（chmod 600）→ 重启 ClipForge。
+**Key 不经过任何对话、不进 bash history、不进 git。**
+
+### 6.5 验证（无 Key 状态）
+
+```
+POST /api/llm/script  {"productName":"测试无线耳机", ...}
+→ {"error":"请配置 LLM 参数（baseUrl、apiKey、model）"}
+```
+✅ 守卫正确拦截（无 Key）；写入 Key 后同一请求将放行并调用 DeepSeek。
+
+### 6.6 成本
+
+DeepSeek 写脚本 ≈ ¥0.001/次；按 100 条/天估算 ≈ **¥3/月**。
+（对比本地 Qwen：需下 9 GB 模型 + 与 H3 抢 24 GB 显存 → 不划算，见 REPORT38）
 
 ---
 
