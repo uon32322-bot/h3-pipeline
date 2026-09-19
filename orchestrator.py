@@ -89,6 +89,18 @@ CFG = {
     "img_timeout_s": 420,        # 单张轮询上限
     "img_batch_circuit_s": 300,  # 整批熔断：转圈超此值 → 降级
     "gate_p_rounds": 2,          # Gate-P 重出上限
+    # ─── P5 跨段一致性（统一影调 + 禁入无关内容）───
+    # 实测问题：各段各自造场景 ⇒ 段间亮度 97/187/94/205 剧烈跳变，拼接后忽明忽暗；
+    #          且混入无关品牌包装（Milk 1L）与画面内英文文字。
+    "series_tone": (
+        "整支广告片的统一视觉基准：与其它镜头保持一致的曝光量与白平衡，"
+        "影调明亮通透、中间调偏亮，不偏黄也不偏蓝，不出现忽明忽暗的跳变；"
+        "画面内不得出现任何文字、字幕、价格、水印、logo、包装上的可读标识；"
+        "除本品外不得出现其它品牌或商品的包装与标签"
+    ),
+    "tone_tolerance": 0.25,      # 段首帧亮度偏离全片中位数的容忍比例
+    "tone_rounds": 2,            # 影调修正重出上限
+    "series_tone_on_anchors": True,   # 母版/锚定照是否也套统一基调
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
     # 视频通道
     "gacha_n": 3,                # 抽卡上限 N<=3
@@ -298,6 +310,24 @@ def snap_frames(seconds: float, fps: int = 24) -> int:
     """官方公式：max(5,round(a*24)) + (5 - (max(5,round(a*24)) % 17)) % 17"""
     f = int(max(5, round(seconds * fps)))
     return f + (5 - (f % 17)) % 17
+
+
+def _tone_sfx(enable: bool = True) -> str:
+    """P5 统一视觉基准后缀（母版/锚定照/段首尾帧共用）。"""
+    if not enable:
+        return ""
+    s = (CFG.get("series_tone") or "").strip()
+    return ("。" + s) if s else ""
+
+
+def _brightness(path) -> float:
+    """图片平均亮度(0-255)。用于跨段影调一致性校验；失败返回 -1。"""
+    try:
+        import numpy as np
+        from PIL import Image
+        return float(np.asarray(Image.open(path).convert("L"), dtype=np.float32).mean())
+    except Exception:
+        return -1.0
 
 
 def _img_ok(p) -> bool:
@@ -601,13 +631,16 @@ class Orchestrator:
         if _img_ok(master):
             log("S4", "  ↺ 复用已有母版 master.png")
         else:
-            self.tt_img(master, CFG["img_size"], "world master sheet, %s" % style, prod_ref + model_ref)
+            self.tt_img(master, CFG["img_size"],
+                        "world master sheet, %s%s" % (style, _tone_sfx(CFG["series_tone_on_anchors"])),
+                        prod_ref + model_ref)
 
         # 4b 锚定照 ×3：全部从母版同源派生（可 3 路并发）→ 满足官方"3 张独立照"
+        _ts = _tone_sfx(CFG["series_tone_on_anchors"])
         anchors = {
-            "main": "hero shot of the product, centered, %s" % style,
-            "material": "macro detail of the product material and texture, %s" % style,
-            "ending": "clean full-frame ending composition, product centered, %s" % style,
+            "main": "hero shot of the product, centered, %s%s" % (style, _ts),
+            "material": "macro detail of the product material and texture, %s%s" % (style, _ts),
+            "ending": "clean full-frame ending composition, product centered, %s%s" % (style, _ts),
         }
         paths: dict[str, str] = {}
         with cf.ThreadPoolExecutor(max_workers=3) as ex:
@@ -639,7 +672,8 @@ class Orchestrator:
             last = self.out / "img" / ("seg%d_last.png" % seg.idx)
             # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
             if not _img_ok(first):
-                if not self.tt_img(first, CFG["img_size"], "start state: %s" % seg.prompt,
+                if not self.tt_img(first, CFG["img_size"],
+                                   "start state: %s。%s" % (seg.prompt, _tone_sfx()),
                                    [base] + identity_refs):
                     return False
             else:
@@ -649,7 +683,8 @@ class Orchestrator:
             #    表现为图全生成出来了却报 0/N 段（曾真实发生，见 tests T7）
             if not _img_ok(last):
                 if not self.tt_img(last, CFG["img_size"],
-                                   "end state, same subject and background: %s" % seg.prompt,
+                                   "end state, same subject and background: %s。%s"
+                                   % (seg.prompt, _tone_sfx()),
                                    [str(first)]):
                     return False
             else:
@@ -660,12 +695,76 @@ class Orchestrator:
         with cf.ThreadPoolExecutor(max_workers=max(len(segments), 1)) as ex:
             oks = list(ex.map(build_segment, segments))
         self.segments = [s for s, ok in zip(segments, oks) if ok]
+        self._base_anchor = base              # P5 影调修正的参考锚
+        self._identity_refs = identity_refs   # P5 重出时复用身份参考
         log("S4", "镜像帧就绪：%d/%d 段（%d 张图 = 母版 + 3 锚 + 段数×2；身份参考 %d 张）" % (
             len(self.segments), len(segments), 4 + len(segments) * 2, len(identity_refs)))
         if not self.segments:
             raise CircuitBreak("S4 图像层全部失败 → 熔断，不进入 GPU")
         self.save_state("S4")
         return {"master": str(master), "anchors": paths}
+
+    # ---------- S4.5 P5 跨段影调一致性 ----------
+    def s4b_tone(self) -> None:
+        """P5：以全片中位亮度为基准，把偏离过大的段自动重出（闭合校验，不抛回用户）。
+
+        实测：各段各自造场景会让段间亮度剧烈跳变（97/187/94/205），拼接后忽明忽暗。
+        """
+        if self.dry:
+            log("S4.5", "[dry] 跳过跨段影调一致性校验")
+            return
+        if len(self.segments) < 2:
+            log("S4.5", "仅 %d 段，无需跨段影调校验" % len(self.segments))
+            return
+        log("S4.5", "★P5 跨段影调一致性校验（%d 段，阈 ±%.0f%%）"
+            % (len(self.segments), CFG["tone_tolerance"] * 100))
+
+        for rnd in range(1, CFG["tone_rounds"] + 1):
+            br = {s.idx: _brightness(s.first) for s in self.segments if s.first}
+            br = {k: v for k, v in br.items() if v >= 0}
+            if len(br) < 2:
+                log("S4.5", "⚠️ 亮度读取失败，跳过校验")
+                return
+            vals = sorted(br.values())
+            med = vals[len(vals) // 2]
+            bad = {k: v for k, v in br.items()
+                   if med > 0 and abs(v - med) / med > CFG["tone_tolerance"]}
+            log("S4.5", "第%d轮 亮度=%s 中位=%.1f 超阈=%s"
+                % (rnd, {k: round(v, 1) for k, v in br.items()}, med, sorted(bad) or "无"))
+            if not bad:
+                log("S4.5", "✅ 影调一致（全部段落在中位 ±%.0f%% 内）"
+                    % (CFG["tone_tolerance"] * 100))
+                self.save_state("S4.5")
+                return
+
+            anchor = getattr(self, "_base_anchor", "") or ""
+            idrefs = getattr(self, "_identity_refs", [])
+            for seg in self.segments:
+                if seg.idx not in bad:
+                    continue
+                adj = ("整体曝光偏亮，请把画面压暗到与参考图一致的通透明亮度"
+                       if bad[seg.idx] > med else
+                       "整体曝光偏暗，请把画面提亮到与参考图一致的通透明亮度")
+                for p in (seg.first, seg.last):
+                    try:
+                        Path(p).unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                if not self.tt_img(Path(seg.first), CFG["img_size"],
+                                   "start state: %s。%s。%s" % (seg.prompt, adj, _tone_sfx()),
+                                   ([anchor] if anchor else []) + idrefs):
+                    log("S4.5", "⚠️ 段%d 影调重出失败（首帧）" % seg.idx)
+                    continue
+                if not self.tt_img(Path(seg.last), CFG["img_size"],
+                                   "end state, same subject and background: %s。%s"
+                                   % (seg.prompt, _tone_sfx()),
+                                   [seg.first]):
+                    log("S4.5", "⚠️ 段%d 影调重出失败（尾帧）" % seg.idx)
+            log("S4.5", "↻ 第%d轮影调重出完成" % rnd)
+
+        log("S4.5", "⚠️ 影调重出到顶（N=%d）仍有余量 —— 已记录，继续后续流程"
+            % CFG["tone_rounds"])
+        self.save_state("S4.5")
 
     # ---------- S5 ----------
     def s5_gate_p(self, imgset: dict) -> dict:
@@ -936,6 +1035,7 @@ class Orchestrator:
             rows = self.s3_gate2(rows)
             segments = self.s2c_group(rows)
             imgset = self.s4_images(segments)
+            self.s4b_tone()
             self.s5_gate_p(imgset)
             self.s6_generate()
             final = self.s8_post()
