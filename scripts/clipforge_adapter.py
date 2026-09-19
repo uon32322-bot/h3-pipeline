@@ -485,7 +485,14 @@ def main() -> int:
 
     out = a.out or "side_a.json"
     Path(out).write_text(json.dumps(side_a, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 闸门评分落盘：供 orchestrator 做「多候选择优」（不是只看一次生成的运气）
+    gate_out = str(Path(out).with_suffix("")) + ".gate.json"
+    Path(gate_out).write_text(json.dumps(
+        {"errors": gate["errors"], "warnings": gate["warnings"], "stats": gate["stats"],
+         "score": [len(gate["errors"]), len(gate["warnings"])]},
+        ensure_ascii=False, indent=2), encoding="utf-8")
     print("[adapter] → %s" % out)
+    print("[adapter] 评分 errors=%d warnings=%d" % (len(gate["errors"]), len(gate["warnings"])))
 
     if gate["errors"]:
         print("[adapter] ⚠️ %d 条结构性 errors（默认只告警，未阻断）" % len(gate["errors"]))

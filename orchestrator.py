@@ -105,6 +105,20 @@ CFG = {
     # ⚠️ 阈值尚未用已验收成片标定 ⇒ 只告警（实测 P5 版主体区变化 14–31%）
     "min_state_change": 0.12,
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
+    # S1 多候选择优：ClipForge 每次生成的质量有随机性（实测同一商品有时 5 场景有时 1 场景），
+    # 跑 N 个候选后按闸门 P3 的 (errors, warnings) 选最优 —— 只挑不改，不创作内容。
+    "s1_candidates": 2,
+    # ─── P4 H3 prompt 组装（官方 FL2VA 三段式）───
+    # 官方 skills/h3-prompt-writing/references/base-en.txt：
+    #   FL2VA 第一行必须是对齐指令 + 一个空行；随后三字段顺序固定
+    #   integrated_multimodal_description / overall_soundscape / non_diegetic_music
+    # "fl2va3" = 组装为官方三段式；"free" = 直接用 ClipForge 原样 prompt（回退用）
+    "h3_prompt_format": "fl2va3",
+    "h3_soundscape_default": (
+        "Natural indoor room tone with faint fabric movement and soft object handling sounds"
+    ),
+    "h3_music_default": "N/A",   # 暂无 BGM（ACE-Step 已部署但未接线，勿编造）
+    "h3_voice_style": "says naturally",
     # 视频通道
     "gacha_n": 3,                # 抽卡上限 N<=3
     "comfy_port": 6011,          # 独立实例（不共用 6006）
@@ -315,6 +329,50 @@ def snap_frames(seconds: float, fps: int = 24) -> int:
     return f + (5 - (f % 17)) % 17
 
 
+def build_h3_prompt(shots: list, seconds: float,
+                    soundscape: str = "", music: str = "N/A") -> str:
+    """把逐镜内容组装成官方 FL2VA 三段式 prompt。
+
+    依据官方 skills/h3-prompt-writing/references/base-en.txt：
+      - FL2VA 第一行必须是「对齐指令」，随后**一个空行**
+        （N = 最后一镜序号，S.SS = 总时长两位小数；破折号是 em dash）
+      - 三字段顺序固定：integrated_multimodal_description / overall_soundscape /
+        non_diegetic_music
+      - 切镜写 `At MM:SS.mmm, the camera cuts to ...`，首镜不写时间戳
+      - 说话人：身份短语写在 <d> **外**，<d> 内只有语言标签 + 原样台词
+      - 相机运动写成句子里的自然英语，不堆标签
+      - LoRA 触发词 r34l1sm 置于描述字段首位
+    """
+    n = max(1, len(shots))
+    align = ("How the reference pictures align with the target video \u2014 "
+             "Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
+             "Picture 2 (from Shot %d) aligns with the %.2f-second mark of the target video."
+             % (n, seconds))
+    parts = []
+    for i, sh in enumerate(shots, 1):
+        vis = (sh.get("visual") or "").strip()
+        # ⚠️ S2 节拍表把台词放在 text.voiceover_zh（不是顶层 line）——
+        #    读错字段会让组装出的 prompt 丢掉全部台词 ⇒ 成片静音。
+        line = (sh.get("line")
+                or (sh.get("text") or {}).get("voiceover_zh")
+                or "").strip()
+        if i == 1:
+            piece = "[Shot 1] %s" % vis
+        else:
+            at = float(sh.get("start", 0.0))
+            mm, ss = int(at // 60), at % 60
+            piece = ("[Shot %d] At %02d:%06.3f, the camera cuts to %s" % (i, mm, ss, vis))
+        if line:
+            piece += (" The woman (S1) %s: <d>[Chinese] %s</d>"
+                      % (CFG.get("h3_voice_style", "says naturally"), line))
+        parts.append(piece)
+    desc = "r34l1sm, " + " ".join(parts)
+    return ("%s\n\nintegrated_multimodal_description: %s\n\noverall_soundscape: %s\n\n"
+            "non_diegetic_music: %s"
+            % (align, desc, soundscape or CFG.get("h3_soundscape_default", ""),
+               music or CFG.get("h3_music_default", "N/A")))
+
+
 def _tone_sfx(enable: bool = True) -> str:
     """P5 统一视觉基准后缀（母版/锚定照/段首尾帧共用）。"""
     if not enable:
@@ -475,35 +533,63 @@ class Orchestrator:
         name = str(p.get("product_name") or "").strip()
         if not name:
             name = (self.job.product_text or "").split()[0] if self.job.product_text else "未命名产品"
-        out = self.out / "report" / "side_a.json"
-        cmd = [sys.executable, str(adapter),
-               "--endpoint", os.environ.get("CLIPFORGE_ENDPOINT", "http://43.136.35.203:3000"),
-               "--name", name,
-               "--desc", self.job.product_text,
-               "--category", str(p.get("category", "other")),
-               "--style", str(p.get("script_style", "pain_point")),
-               "--duration", str(int(p.get("duration", 30))),
-               "--fidelity", self.job.fidelity_class,
-               "--out", str(out)]
+        out_dir = self.out / "report"
+        base_cmd = [sys.executable, str(adapter),
+                    "--endpoint", os.environ.get("CLIPFORGE_ENDPOINT", "http://43.136.35.203:3000"),
+                    "--name", name,
+                    "--desc", self.job.product_text,
+                    "--category", str(p.get("category", "other")),
+                    "--style", str(p.get("script_style", "pain_point")),
+                    "--duration", str(int(p.get("duration", 30))),
+                    "--fidelity", self.job.fidelity_class]
         if p.get("gate_p3_strict"):
-            cmd.append("--strict")
+            base_cmd.append("--strict")
         for img in self.job.product_images:
-            cmd += ["--image", img]
-        try:
-            r = subprocess.run(cmd, capture_output=True, text=True, timeout=CFG["s1_timeout_s"])
-        except subprocess.TimeoutExpired:
-            raise CircuitBreak("S1 ClipForge 超时（>%ds）" % CFG["s1_timeout_s"])
-        for line in (r.stdout or "").splitlines():
-            if line.startswith("[adapter]") or line.startswith("[闸门P3"):
-                log("S1", line)
-        if r.returncode == 3:
-            raise CircuitBreak("S1 ★闸门P3 结构性否决（--strict）→ 回炉重写台词/拆分镜")
-        if r.returncode != 0 or not out.exists():
-            raise CircuitBreak("S1 ClipForge 适配失败 rc=%d%s：%s"
-                               % (r.returncode,
-                                  "（rc=2 通常是参数/用法错误，非闸门否决）" if r.returncode == 2 else "",
-                                  ((r.stdout or r.stderr) or "")[-300:]))
-        return json.loads(out.read_text(encoding="utf-8"))
+            base_cmd += ["--image", img]
+
+        k_n = max(1, int(CFG.get("s1_candidates", 2)))
+        cands = []
+        for k in range(1, k_n + 1):
+            cand_out = out_dir / ("side_a_cand%d.json" % k)
+            try:
+                r = subprocess.run(base_cmd + ["--out", str(cand_out)],
+                                   capture_output=True, text=True, timeout=CFG["s1_timeout_s"])
+            except subprocess.TimeoutExpired:
+                log("S1", "候选%d 超时（>%ds）" % (k, CFG["s1_timeout_s"]))
+                continue
+            for line in (r.stdout or "").splitlines():
+                if (line.startswith("[闸门P3") or line.startswith("[adapter] 评分")
+                        or line.startswith("[adapter] ⏱")):
+                    log("S1", "候选%d %s" % (k, line.strip()))
+            if r.returncode == 3:
+                log("S1", "候选%d 被闸门否决（--strict）" % k)
+                continue
+            if r.returncode != 0 or not cand_out.exists():
+                log("S1", "候选%d 失败 rc=%d：%s"
+                    % (k, r.returncode, ((r.stdout or r.stderr) or "")[-200:]))
+                continue
+            gate_f = Path(str(cand_out).replace(".json", ".gate.json"))
+            gate = {}
+            if gate_f.exists():
+                try:
+                    gate = json.loads(gate_f.read_text(encoding="utf-8"))
+                except Exception:
+                    gate = {}
+            score = tuple(gate.get("score") or [len(gate.get("errors", [])),
+                                                len(gate.get("warnings", []))])
+            cands.append({"k": k, "gate": gate, "score": score,
+                          "data": json.loads(cand_out.read_text(encoding="utf-8"))})
+            log("S1", "候选%d 评分 errors=%d warnings=%d" % (k, score[0], score[1]))
+
+        if not cands:
+            raise CircuitBreak("S1 ClipForge 全部 %d 个候选均失败" % k_n)
+        best = min(cands, key=lambda c: c["score"])
+        (out_dir / "side_a.json").write_text(
+            json.dumps(best["data"], ensure_ascii=False, indent=2), encoding="utf-8")
+        log("S1", "择优：候选%d/%d（errors=%d warnings=%d）。全部候选评分 %s"
+            % (best["k"], len(cands), best["score"][0], best["score"][1],
+               {c["k"]: list(c["score"]) for c in cands}))
+        return dict(best["data"])
 
     def s1_script(self) -> dict:
         """ClipForge 文字层（P1：已接 clipforge_adapter.py → side_a 契约）。
@@ -621,9 +707,15 @@ class Orchestrator:
                 else:
                     at = sum(x["seconds_snapped"] for x in g[:k])
                     lines.append("[Shot %d] At 00:%06.3f %s" % (k + 1, at, r["visual"]))
-            h3_lines = [r.get("h3_prompt", "").strip() for r in g if r.get("h3_prompt", "").strip()]
+            if CFG.get("h3_prompt_format") == "free":
+                h3_lines = [r.get("h3_prompt", "").strip() for r in g
+                            if r.get("h3_prompt", "").strip()]
+                seg_h3 = "\n\n".join(h3_lines)
+            else:
+                # 官方 FL2VA 三段式（用逐镜 visual + line 组装，不丢内容）
+                seg_h3 = build_h3_prompt(g, total)
             segs.append(Segment(idx=gi, seconds=total, prompt="\n".join(lines),
-                                h3_prompt="\n\n".join(h3_lines)))
+                                h3_prompt=seg_h3))
         log("S3.5", "分组：%d 镜 → %d 段（S=%d；平均段长 %.2fs，上限 %.0fs）" % (
             len(rows), len(segs), len(segs),
             sum(s.seconds for s in segs) / max(len(segs), 1), CFG["seg_max_seconds"]))
