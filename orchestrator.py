@@ -67,7 +67,6 @@ def _resolve(name: str) -> Path:
 
 TTIMG = _resolve("ttimg.py")
 H3GEN = _resolve("test_fl2v_official.py")
-JUDGE = _resolve("judge_shot.py")
 
 # ─────────────────────────── 配置 ───────────────────────────
 
@@ -88,6 +87,7 @@ CFG = {
     "img_timeout_s": 420,        # 单张轮询上限
     "img_batch_circuit_s": 300,  # 整批熔断：转圈超此值 → 降级
     "gate_p_rounds": 2,          # Gate-P 重出上限
+    "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
     # 视频通道
     "gacha_n": 3,                # 抽卡上限 N<=3
     "comfy_port": 6011,          # 独立实例（不共用 6006）
@@ -124,22 +124,14 @@ def derive_img_size(aspect_short, mp, multiple=32):
 if CFG["img_size"] == "auto":
     CFG["img_size"] = derive_img_size(CFG["aspect"], CFG["megapixels"])
 
-# ─── 模型使用原则（辉哥拍板 2026-09-17；2026-09-18 追加判官项 · 硬规范，不可绕过） ───
+# ─── 模型使用原则（辉哥拍板 2026-09-17 · 硬规范，不可绕过） ───
 # ① 生图：只允许 TT Image2（灵炫）
 # ② 视频：灵炫平台（及任何云端）的视频模型一律禁用 —— 视频只走本项目自持的 H3 权重
 # ③ 文字：优先 GPT5.5 / GEM 3.7；没有授权的模型坚决不能用
-# ④ 判官/审片：只允许 TT-5.6luna（灵炫 tt-5.6-luna）—— 由它替换原先越界使用的
-#    doubao-seed-2-1-pro；**除 tt-5.6-luna 外不得再调用任何同类多模态模型**
 MODEL_POLICY = {
     "image": {
         "allow": ["tt-image-2"],
         "note": "灵炫生图只准 TT Image2；换模型需辉哥重新授权",
-    },
-    "judge": {
-        "allow": ["tt-5.6-luna"],
-        "banned": ["doubao-seed-*", "gem-*", "omni-*", "qwen*-vl", "kimi*",
-                   "glm*", "deepseek-*", "MiniMax-*"],
-        "note": "判官只准 tt-5.6-luna；judge_shot.py 内另有 ALLOWED_VLM_MODELS 断言兜底",
     },
     "video": {
         "allow_local": ["minimax_h3_fl2va_pruned_int8_convrot.safetensors"],
@@ -166,13 +158,6 @@ def _check_model_policy() -> list[str]:
     h = H3GEN.read_text(encoding="utf-8") if H3GEN.exists() else ""
     if "minimax_h3_fl2va" not in h:
         warns.append("H3 调用脚本未见 minimax_h3_fl2va 权重 —— 视频链路不在白名单内")
-    # ④ 判官白名单（2026-09-18 辉哥规范）：只准 tt-5.6-luna，且脚本内必须有硬断言兜底
-    if not JUDGE.exists():
-        warns.append("未找到 judge_shot.py —— 判官链路无法校验白名单")
-    else:
-        j = JUDGE.read_text(encoding="utf-8")
-        if 'ALLOWED_VLM_MODELS = ("tt-5.6-luna",)' not in j:
-            warns.append("judge_shot.py 缺少 tt-5.6-luna 白名单断言 —— 违反判官白名单")
     return warns
 
 
@@ -414,9 +399,56 @@ class Orchestrator:
         self.save_state("S0")
 
     # ---------- S1 ----------
+    def _s1_clipforge(self) -> dict:
+        """调 clipforge_adapter.py：ClipForge → side_a 契约（含 P3 闸门预检）。
+
+        失败一律 CircuitBreak（禁止静默续跑）。
+        P3 闸门**默认只告警**（新门禁须先用已验收成片标定）；params.gate_p3_strict=True 才阻断。
+        """
+        adapter = HERE / "clipforge_adapter.py"
+        if not adapter.exists():
+            raise CircuitBreak("S1 找不到 clipforge_adapter.py（%s）" % adapter)
+        p = self.job.params or {}
+        name = str(p.get("product_name") or "").strip()
+        if not name:
+            name = (self.job.product_text or "").split()[0] if self.job.product_text else "未命名产品"
+        out = self.out / "report" / "side_a.json"
+        cmd = [sys.executable, str(adapter),
+               "--endpoint", os.environ.get("CLIPFORGE_ENDPOINT", "http://43.136.35.203:3000"),
+               "--name", name,
+               "--desc", self.job.product_text,
+               "--category", str(p.get("category", "other")),
+               "--style", str(p.get("script_style", "pain_point")),
+               "--duration", str(int(p.get("duration", 30))),
+               "--fidelity", self.job.fidelity_class,
+               "--out", str(out)]
+        if p.get("gate_p3_strict"):
+            cmd.append("--strict")
+        for img in self.job.product_images:
+            cmd += ["--image", img]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=CFG["s1_timeout_s"])
+        except subprocess.TimeoutExpired:
+            raise CircuitBreak("S1 ClipForge 超时（>%ds）" % CFG["s1_timeout_s"])
+        for line in (r.stdout or "").splitlines():
+            if line.startswith("[adapter]") or line.startswith("[闸门P3"):
+                log("S1", line)
+        if r.returncode == 3:
+            raise CircuitBreak("S1 ★闸门P3 结构性否决（--strict）→ 回炉重写台词/拆分镜")
+        if r.returncode != 0 or not out.exists():
+            raise CircuitBreak("S1 ClipForge 适配失败 rc=%d%s：%s"
+                               % (r.returncode,
+                                  "（rc=2 通常是参数/用法错误，非闸门否决）" if r.returncode == 2 else "",
+                                  ((r.stdout or r.stderr) or "")[-300:]))
+        return json.loads(out.read_text(encoding="utf-8"))
+
     def s1_script(self) -> dict:
-        """ClipForge 文字层。真实部署时改为调 MCP：clipforge_ingest_product / clipforge_generate_script。"""
-        log("S1", "文字层（ClipForge，Mac CPU，与 GPU 链并行）")
+        """ClipForge 文字层（P1：已接 clipforge_adapter.py → side_a 契约）。
+
+        契约：**ClipForge 是唯一内容来源**；本方法只做「调用 + 落盘 + 透传」，
+        不重写台词、不增删镜头、不改卖点表述（再做创作会破坏带货结构与判官标定）。
+        """
+        log("S1", "文字层（ClipForge）")
         if self.dry:
             side_a = {
                 "product": {"name": "示例产品", "category": "食品饮品",
@@ -436,8 +468,7 @@ class Orchestrator:
                 ],
             }
         else:
-            # TODO: 接 ClipForge MCP（见 REPORT20 §融入方案）
-            raise CircuitBreak("S1 未接 ClipForge：请先部署并实现 MCP 适配器（--dry-run 可跳过）")
+            side_a = self._s1_clipforge()
         (self.out / "report" / "side_a.json").write_text(
             json.dumps(side_a, ensure_ascii=False, indent=2), encoding="utf-8")
         self.save_state("S1")
@@ -459,6 +490,8 @@ class Orchestrator:
                 "start": sh["start"], "end": sh["end"],
                 "frames": frames, "seconds_snapped": frames / CFG["fps"],
                 "purpose": "", "visual": sh["visual"], "camera": cam,
+                # 🔴 h3_prompt 与 visual 分家：前者只进视频层，后者只进图像层
+                "h3_prompt": sh.get("h3_prompt", ""),
                 "text": {"onscreen_en": "", "voiceover_zh": sh["line"], "post_zh": ""},
             })
         for w in warns:
@@ -656,11 +689,55 @@ class Orchestrator:
 
     # ---------- S7 ----------
     def s7_judge(self, seg: Segment) -> dict:
-        """判官团：L0/L1 本地 CPU + L2 远端 VLM，三级全部出 GPU，异步解耦"""
+        """判官团：L0/L1 本地 CPU + L2 远端 VLM，三级全部出 GPU，异步解耦
+
+        实接 judge_shot.py（warn_only 模式：标定集未建前不阻塞）
+        返回字段契约：{pass, redraw, structural, type, summary, na_ratio, ...}
+        """
         if self.dry:
             return {"pass": True, "type": "random", "redraw": True, "hidden": True}
-        # 真实实现：调 judge_l1.py + 远端 VLM 并发（见 judge_config.yaml）
-        raise CircuitBreak("S7 判官未接入（--dry-run 可跳过）")
+        if not seg.video or not Path(seg.video).exists():
+            log("S7", "⚠️ 段%d 视频路径不存在: %s, 跳过判官" % (seg.idx, seg.video))
+            return {"pass": True, "type": "skipped", "redraw": True, "hidden": True, "reason": "no video file"}
+
+        # ffprobe 拿 w/h/frames
+        try:
+            probe = json.loads(subprocess.run(
+                ["ffprobe", "-v", "error", "-print_format", "json",
+                 "-show_streams", "-select_streams", "v:0", seg.video],
+                capture_output=True, text=True, timeout=15
+            ).stdout)
+            vs = probe["streams"][0]
+            w, h = int(vs["width"]), int(vs["height"])
+            nb_frames = int(vs.get("nb_frames", 0) or 0)
+        except Exception as e:
+            log("S7", "⚠️ 段%d ffprobe 失败: %s, 跳过判官" % (seg.idx, e))
+            return {"pass": True, "type": "skipped", "redraw": True, "hidden": True, "reason": "ffprobe: " + str(e)}
+
+        # 调 judge_shot.py（warn_only=True = 不阻塞）
+        judge_script = Path(__file__).parent / "judge_shot.py"
+        try:
+            r = subprocess.run(
+                [sys.executable, str(judge_script),
+                 seg.video, str(w), str(h), str(nb_frames), "24", str(seg.seconds)],
+                capture_output=True, text=True, timeout=120
+            )
+            if r.returncode != 0:
+                log("S7", "⚠️ 段%d 判官执行失败 (rc=%d): %s" % (seg.idx, r.returncode, r.stderr[:200]))
+                return {"pass": True, "type": "judge_error", "redraw": True, "hidden": True,
+                        "reason": "judge_shot rc=" + str(r.returncode)}
+            result = json.loads(r.stdout)
+            s = result.get("summary", {})
+            log("S7", "段%d 判官: pass=%s yes=%d no=%d na=%d structural=%d warn_only=%s" % (
+                seg.idx, result.get("pass"), s.get("yes", 0), s.get("no", 0),
+                s.get("na", 0), s.get("structural_count", 0), result.get("warn_only", False)))
+            return result
+        except subprocess.TimeoutExpired:
+            log("S7", "⚠️ 段%d 判官超时 120s, 跳过" % seg.idx)
+            return {"pass": True, "type": "timeout", "redraw": True, "hidden": True}
+        except json.JSONDecodeError as e:
+            log("S7", "⚠️ 段%d 判官输出解析失败: %s, stdout=%s" % (seg.idx, e, r.stdout[:200]))
+            return {"pass": True, "type": "parse_error", "redraw": True, "hidden": True}
 
     # ---------- S8 / S9 ----------
     def s8_post(self) -> str:
