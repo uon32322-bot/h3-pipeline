@@ -161,21 +161,34 @@ def build_graph(first, last, prompt, seconds, mp, steps, prefix, seed, mid=None,
     # ⚠️ 多个锚点必须【串联】而不是并联：每个 AddGuide 都是往 positive 上 append 一个
     #    keyframe（`keyframes = list(positive[0][1].get("minimax_keyframes", []))` + append），
     #    并联的话后一个会从旧 positive 出发 ⇒ 前一个的 keyframe 被丢掉。
+    # 🔴 2026-09-20 修复：mid/audio 改为**支持多个**。原实现只有单个 mid，
+    #    而调用方（orchestrator）会循环追加多对 `--mid`，argparse 后值覆盖前值
+    #    ⇒ 中间锚点被静默丢弃（锚点丢失直接造成动作/主体漂移，日志完全看不出）。
+    #    兼容旧调用：传单个 tuple 时自动包成列表。
+    if mid and not isinstance(mid, list):
+        mid = [mid]
+    if audio and not isinstance(audio, list):
+        audio = [audio]
     tail = ["7", 0]
-    if mid:                                    # 画面锚点（image）
-        img, sec = mid
-        g["21"] = {"class_type": "LoadImage", "inputs": {"image": img}}
-        g["22"] = {"class_type": "MiniMaxH3AddGuide", "inputs": {
+    _nid = 20
+    for _m in (mid or []):                     # 画面锚点（可多个，必须【串联】）
+        _img, _sec = _m
+        _nid += 1; _lid = str(_nid)
+        _nid += 1; _gid = str(_nid)
+        g[_lid] = {"class_type": "LoadImage", "inputs": {"image": _img}}
+        g[_gid] = {"class_type": "MiniMaxH3AddGuide", "inputs": {
             "positive": tail, "latent": ["7", 1],
-            "frame_idx": int(round(sec * 24)), "vae": ["3", 0], "image": ["21", 0]}}
-        tail = ["22", 0]
-    if audio:                                  # 语音锚点（audio）—— ⭐ L 口型同步模式的实现处
-        wav, sec = audio
-        g["23"] = {"class_type": "LoadAudio", "inputs": {"audio": wav}}
-        g["24"] = {"class_type": "MiniMaxH3AddGuide", "inputs": {
+            "frame_idx": int(round(_sec * 24)), "vae": ["3", 0], "image": [_lid, 0]}}
+        tail = [_gid, 0]
+    for _a in (audio or []):                   # 语音锚点（L 口型同步，可多个）
+        _wav, _sec = _a
+        _nid += 1; _lid = str(_nid)
+        _nid += 1; _gid = str(_nid)
+        g[_lid] = {"class_type": "LoadAudio", "inputs": {"audio": _wav}}
+        g[_gid] = {"class_type": "MiniMaxH3AddGuide", "inputs": {
             "positive": tail, "latent": ["7", 1],
-            "frame_idx": int(round(sec * 24)), "audio_vae": ["4", 0], "audio": ["23", 0]}}
-        tail = ["24", 0]
+            "frame_idx": int(round(_sec * 24)), "audio_vae": ["4", 0], "audio": [_lid, 0]}}
+        tail = [_gid, 0]
     if tail != ["7", 0]:
         g["11"]["inputs"]["conditioning"] = tail
     return g
@@ -255,8 +268,9 @@ def main():
     ap.add_argument("steps", nargs="?", type=int, default=8)
     ap.add_argument("prefix", nargs="?", default="video/H3-OFFICIAL")
     ap.add_argument("seed", nargs="?", type=int, default=123456789)
-    ap.add_argument("--mid", default=None, help="中间锚点，格式 PNG@秒，如 anc/m.png@1.5")
-    ap.add_argument("--audio", default=None,
+    ap.add_argument("--mid", action="append", default=None,
+                    help="中间锚点，格式 PNG@秒，如 anc/m.png@1.5（可重复；多个必须串联见 build_graph 注释）")
+    ap.add_argument("--audio", action="append", default=None,
                     help="⭐ 语音锚点（L 口型同步模式）：音轨锚在指定帧，格式 WAV@秒，"
                          "如 vo/s4.wav@0。音频放 ComfyUI 的 input/ 目录（LoadAudio 按文件名取）。"
                          "每去噪步重注入 audio_latent ⇒ 音轨内容保留、画面口型被牵引对齐该音频。")
@@ -287,14 +301,21 @@ def main():
     a = ap.parse_args()
 
     prompt = open(a.prompt_file, encoding="utf-8").read().strip()
-    mid = None
-    if a.mid:
-        img, _, sec = a.mid.partition("@")
-        mid = (img, float(sec or 0))
-    audio = None
-    if a.audio:
-        wav, _, sec = a.audio.partition("@")
-        audio = (wav, float(sec or 0))
+    # 支持多个锚点（--mid 可重复）。原实现只取单个 ⇒ 调用方循环追加时被覆盖丢失。
+    def _parse_anchors(items):
+        out = []
+        for _it in (items or []):
+            _p, _, _sec = str(_it).partition("@")
+            out.append((_p, float(_sec or 0)))
+        return out or None
+    mid = _parse_anchors(a.mid)
+    audio = _parse_anchors(a.audio)
+    if mid:
+        print("画面锚点 %d 个：" % len(mid),
+              ", ".join("%s@%ss" % (m[0].split("/")[-1], m[1]) for m in mid))
+    if audio:
+        print("语音锚点 %d 个：" % len(audio),
+              ", ".join("%s@%ss" % (x[0].split("/")[-1], x[1]) for x in audio))
 
     # ---- 首尾帧比例守卫（防御前移：把会「静默毁片」的比例错误挡在 GPU 之外）----
     asp = ASPECT_CHOICES[a.aspect]
@@ -358,7 +379,16 @@ def main():
         print("prompt_id =", pid, "| frames =", snap_frames(a.seconds), "| steps =", a.steps,
               "| mp =", a.mp, "| seed =", a.seed, "| lora =", os.path.basename(a.lora))
 
+        # 🔴 2026-09-20 修复：原 `while True` 无总超时 ⇒ ComfyUI 卡队列/节点 hang 时
+        #    本进程会一直占着 GPU 租约空转（租约只在进程退出时释放）；且无论
+        #    status_str 是 success 还是 error 都 return 0 ⇒ 上游只能看到
+        #    「执行完成但未找到产物」，排障信息被抹掉。
+        _deadline = time.time() + float(os.environ.get("H3_POLL_TIMEOUT_S", "3600"))
         while True:
+            if time.time() > _deadline:
+                print("⛔ 轮询超时 %.0fs（H3_POLL_TIMEOUT_S）—— ComfyUI 可能卡队列或节点 hang"
+                      % (time.time() - t0))
+                return 4
             time.sleep(5)
             try:
                 h = get(host, "/history/" + pid)
@@ -366,12 +396,18 @@ def main():
                 print("  poll err", e); continue
             if pid in h:
                 entry = h[pid]
-                print("status =", entry.get("status", {}).get("status_str"))
+                _st = entry.get("status", {}).get("status_str")
+                print("status =", _st)
                 for nid, out in (entry.get("outputs") or {}).items():
                     for key in ("videos", "gifs", "images"):
                         for item in (out.get(key) or []):
                             print("OUTPUT", key, item.get("subfolder", ""), item.get("filename"))
                 print("elapsed = %.1fs" % (time.time() - t0))
+                if _st != "success":
+                    print("⛔ ComfyUI 执行未成功（status_str=%s），打印错误明细并返回 5：" % _st)
+                    for _m in (entry.get("status", {}).get("messages") or [])[-6:]:
+                        print("  comfy:", str(_m)[:500])
+                    return 5
                 return 0
             print("  ...running %.0fs" % (time.time() - t0))
     finally:
