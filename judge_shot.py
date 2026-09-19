@@ -40,8 +40,22 @@ import numpy as np
 
 # ---------------------------------------------------------------- L2 VLM 通道
 VLM_BASE = "https://api.lk888.ai"
-VLM_KEY = os.environ.get(
-    "LK888_KEY", "sk-dafee1450167a9d3ca0d9ed0224b313ae054f49437836a55")
+
+# —— 密钥加载（fail-closed：禁止硬编码回退，Key 只存在于环境变量/600 密钥文件）——
+import sys as _sys
+from pathlib import Path as _Path
+
+_boot_root = next(
+    (p for p in [_Path(__file__).resolve().parent, *_Path(__file__).resolve().parent.parents]
+     if (p / "h3secrets.py").exists()),
+    None,
+)
+if _boot_root is None:
+    _sys.stderr.write("[boot] 找不到 h3secrets.py，拒绝启动（fail-closed）\n")
+    raise SystemExit(78)
+_sys.path.insert(0, str(_boot_root))
+from h3secrets import lk888_key as _lk888_key  # noqa: E402
+VLM_KEY = _lk888_key()
 
 # ⛔ 硬规范（2026-09-18 辉哥拍板）：L2 判官只能用 tt-5.6-luna，禁止再调用任何同类模型。
 #    背景：本脚本原先走 doubao-seed-2-1-pro-260628 —— 与生图模型 tt-image-2 同属一个网关下的

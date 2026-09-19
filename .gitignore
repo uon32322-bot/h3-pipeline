@@ -31,3 +31,6 @@ Thumbs.db
 .env.local
 *.key
 *.pem
+.secrets.env
+secrets.env
+*.env
