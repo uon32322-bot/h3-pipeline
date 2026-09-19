@@ -59,9 +59,22 @@ r = subprocess.run(["git", "grep", "-n", "-I", "-E", r"sk-[A-Za-z0-9]{16,}"],
 check("T4 git 跟踪文件无明文 Key", not r.stdout.strip(), r.stdout.strip()[:200])
 
 # T5：ttimg.py / judge_shot.py 已接入 h3secrets，且不再回到 os.environ.get 回退
-for rel, var in [("ttimg.py", "KEY"), ("judge_shot.py", "VLM_KEY")]:
-    src = (ROOT / rel).read_text(encoding="utf-8")
-    ok = ("_lk888_key()" in src) and ('os.environ.get(\n    "LK888_KEY"' not in src) and ('os.environ.get("LK888_KEY"' not in src)
+#     （脚本可能在仓库根或 scripts/ 下 —— 两处都找，避免测试与部署布局强绑）
+def _find(name):
+    for cand in (ROOT / name, ROOT / "scripts" / name):
+        if cand.exists():
+            return cand, cand.relative_to(ROOT)
+    return None, None
+
+
+for name in ("ttimg.py", "judge_shot.py"):
+    path, rel = _find(name)
+    if path is None:
+        check("T5 %s 存在" % name, False, "两处均未找到")
+        continue
+    src = path.read_text(encoding="utf-8")
+    ok = ("_lk888_key()" in src) and ('os.environ.get(\n    "LK888_KEY"' not in src) \
+         and ('os.environ.get("LK888_KEY"' not in src)
     check("T5 %s 已接入 h3secrets" % rel, ok)
 
 print()
