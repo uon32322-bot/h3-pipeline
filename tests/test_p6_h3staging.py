@@ -119,6 +119,27 @@ finally:
         O.CFG["h3_input_dir"] = orig_in
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # ── T7 产物路径解析（回归：只取文件名 ⇒ 恒判「未产出」）──
+    import tempfile as _tf2
+    with _tf2.TemporaryDirectory() as td2:
+        base = Path(td2)
+        (base / "video").mkdir()
+        made = base / "video" / "H3_SEG1_00001_.mp4"
+        made.write_bytes(b"x" * 2048)
+        # 正常 4 段格式
+        got = O.parse_h3_output("OUTPUT videos video H3_SEG1_00001_.mp4\nelapsed = 848.3s\n",
+                                base, "video/H3_SEG1")
+        check("T7a 正确拼出绝对路径", got == str(made), got)
+        # 无 OUTPUT 行 ⇒ 前缀兜底
+        got2 = O.parse_h3_output("prompt_id = abc\nelapsed = 1s\n", base, "video/H3_SEG1")
+        check("T7b 无 OUTPUT 行时按前缀兜底", got2 == str(made), got2)
+        # 完全不存在的产物 ⇒ None（不得瞎编路径）
+        got3 = O.parse_h3_output("OUTPUT videos video NOPE.mp4\n", base, "video/H3_SEG9")
+        check("T7c 产物不存在时返回 None（不瞎编）", got3 is None, got3)
+        # 旧实现的错法：只取最后 token 会得到裸文件名，其路径不存在的目录下
+        check("T7d 裸文件名不可直接当路径用",
+              not Path("H3_SEG1_00001_.mp4").exists())
+
 print()
 if FAIL:
     print("FAILED %d: %s" % (len(FAIL), FAIL))

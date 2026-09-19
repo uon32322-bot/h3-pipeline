@@ -125,6 +125,13 @@ CFG = {
     # ⚠️ ComfyUI 的 LoadImage 只接受 --input-directory 白名单内的路径；
     #    喂白名单外的路径会报 `Invalid image file` 并让整段生成失败（实测全片 4 段全灭）。
     "h3_input_dir": "/root/autodl-tmp/h3p/input",
+    # ComfyUI 的 --output-directory（产物路径 = 该目录 / subfolder / filename）
+    "comfy_output_dir": "/root/autodl-tmp/h3p/output",
+    # ─── 提速旋钮（LoRA 步数）───
+    # 实测：8step 版每步 95.7s × 8 = 12:47，加 160s 模型初始化 = 14:08/段。
+    # 机器上同时存在 4step 版（1.96GB）；换它理论上把采样砍半，**须 A/B 验画质后再定**。
+    "h3_lora": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors",
+    "h3_lora_4step": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
     # 闸门② 动作白名单与禁写（与 shotlist_schema.json 的 gate2_merged_rules 同源）
     "action_whitelist": [
         "举起", "并排", "推近", "旋转", "开合", "滑入", "光影流动", "静置", "特写平移",
@@ -332,6 +339,32 @@ def snap_frames(seconds: float, fps: int = 24) -> int:
     return f + (5 - (f % 17)) % 17
 
 
+def parse_h3_output(stdout: str, comfy_out, prefix: str):
+    """从 test_fl2v_official 的 stdout 解析出产物【绝对路径】。
+
+    ⚠️ 它打印的是 `OUTPUT <key> <subfolder> <filename>`（4 段）；
+    旧实现只取最后一个 token（纯文件名）⇒ Path(...).exists() 恒为 False
+    ⇒ 每段白跑十几分钟后被判「未产出」重抽（实测踩到，见 tests T7）。
+    """
+    out = None
+    for line in (stdout or "").splitlines():
+        if not line.startswith("OUTPUT "):
+            continue
+        parts = line.split()
+        cand = (Path(comfy_out) / parts[2] / parts[3]) if len(parts) >= 4 \
+            else (Path(comfy_out) / parts[-1])
+        if cand.exists():
+            out = str(cand)
+            break
+    if out is None:
+        stamp = Path(prefix).name
+        cands = sorted(Path(comfy_out).rglob(stamp + "*.mp4"),
+                       key=lambda p: p.stat().st_mtime, reverse=True)
+        if cands:
+            out = str(cands[0])
+    return out
+
+
 def build_h3_prompt(shots: list, seconds: float,
                     soundscape: str = "", music: str = "N/A") -> str:
     """把逐镜内容组装成官方 FL2VA 三段式 prompt。
@@ -522,7 +555,7 @@ class Orchestrator:
         cmd = [sys.executable, str(H3GEN),
                f1, f2, str(pf), str(seg.seconds), str(CFG["megapixels"]),
                str(CFG["steps"]), prefix, str(seg.seed), "--port", str(CFG["comfy_port"]),
-               "--aspect", CFG["aspect"]]
+               "--aspect", CFG["aspect"], "--lora", CFG["h3_lora"]]
         for img, sec in seg.mids:
             st = self._stage_one(Path(img), "mid%d_%s" % (seg.idx, sec))
             cmd += ["--mid", "%s@%s" % (st or img, sec)]
@@ -530,10 +563,12 @@ class Orchestrator:
         if r.returncode != 0:
             log("S6", "⚠️ H3 失败：%s" % (r.stdout or r.stderr)[-400:])
             return None
-        out = None
-        for line in r.stdout.splitlines():
-            if line.startswith("OUTPUT"):
-                out = line.split()[-1]
+        out = parse_h3_output(r.stdout, CFG.get("comfy_output_dir", "/root/autodl-tmp/h3p/output"),
+                              prefix)
+        if out is None:
+            log("S6", "⚠️ H3 执行完成但未找到产物；stdout 尾部：%s" % ((r.stdout or "")[-300:]))
+        else:
+            log("S6", "  产物 %s（%.1f MB）" % (Path(out).name, Path(out).stat().st_size / 1e6))
         return out
 
     # ---------- S0 ----------
