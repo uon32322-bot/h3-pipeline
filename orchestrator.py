@@ -130,8 +130,10 @@ CFG = {
     # ─── 提速旋钮（LoRA 步数）───
     # 实测：8step 版每步 95.7s × 8 = 12:47，加 160s 模型初始化 = 14:08/段。
     # 机器上同时存在 4step 版（1.96GB）；换它理论上把采样砍半，**须 A/B 验画质后再定**。
-    "h3_lora": "minimax_h3_fl2v_turbo_8step_v1.0_768p_comfyui_resized_avg_rank_64_bf16.safetensors",
-    "h3_lora_4step": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors",
+    # ⚠️ 名字必须与 ComfyUI 可见列表**逐字一致**，否则整段提交被拒（value_not_in_list）。
+    #    实测可用（/root/autodl-tmp/h3p/models/loras/）只有这两个：
+    "h3_lora": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",          # 1.96GB
+    "h3_lora_4step": "minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_resized_avg_rank_21_bf16.safetensors",  # 298MB
     # 闸门② 动作白名单与禁写（与 shotlist_schema.json 的 gate2_merged_rules 同源）
     "action_whitelist": [
         "举起", "并排", "推近", "旋转", "开合", "滑入", "光影流动", "静置", "特写平移",
