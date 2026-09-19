@@ -101,6 +101,9 @@ CFG = {
     "tone_tolerance": 0.25,      # 段首帧亮度偏离全片中位数的容忍比例
     "tone_rounds": 2,            # 影调修正重出上限
     "series_tone_on_anchors": True,   # 母版/锚定照是否也套统一基调
+    # 首尾帧「状态变化量」下限：FL2VA 靠两帧之间插值，差异过小 ⇒ 输出近乎静止
+    # ⚠️ 阈值尚未用已验收成片标定 ⇒ 只告警（实测 P5 版主体区变化 14–31%）
+    "min_state_change": 0.12,
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
     # 视频通道
     "gacha_n": 3,                # 抽卡上限 N<=3
@@ -326,6 +329,20 @@ def _brightness(path) -> float:
         import numpy as np
         from PIL import Image
         return float(np.asarray(Image.open(path).convert("L"), dtype=np.float32).mean())
+    except Exception:
+        return -1.0
+
+
+def _change_ratio(a, b, thr: int = 8) -> float:
+    """两张同尺寸图「变化像素占比」(0~1)。用于首尾帧状态变化量体检；失败返回 -1。"""
+    try:
+        import numpy as np
+        from PIL import Image
+        x = np.asarray(Image.open(a).convert("RGB"), dtype=np.float32)
+        y = np.asarray(Image.open(b).convert("RGB"), dtype=np.float32)
+        if x.shape != y.shape:
+            return -1.0
+        return float((np.abs(x - y).mean(axis=2) > thr).mean())
     except Exception:
         return -1.0
 
@@ -729,6 +746,15 @@ class Orchestrator:
             med = vals[len(vals) // 2]
             bad = {k: v for k, v in br.items()
                    if med > 0 and abs(v - med) / med > CFG["tone_tolerance"]}
+            # 首尾帧状态变化量体检（只告警：差异过小会让 H3 输出近乎静止）
+            for seg in self.segments:
+                chg = _change_ratio(seg.first, seg.last)
+                if 0 <= chg < CFG["min_state_change"]:
+                    log("S4.5", "⚠️ 段%d 首尾帧变化仅 %.1f%%（下限 %.0f%%）→ H3 可能近乎静止"
+                        % (seg.idx, chg * 100, CFG["min_state_change"] * 100))
+                elif chg >= 0:
+                    log("S4.5", "  · 段%d 状态变化 %.1f%%" % (seg.idx, chg * 100))
+
             log("S4.5", "第%d轮 亮度=%s 中位=%.1f 超阈=%s"
                 % (rnd, {k: round(v, 1) for k, v in br.items()}, med, sorted(bad) or "无"))
             if not bad:
