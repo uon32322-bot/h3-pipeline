@@ -88,6 +88,26 @@ case "$VRAM_MODE" in
   *)      VRAM_ARGS="" ;;   # auto：交给 ComfyUI 自动管理
 esac
 
+# ---------- 5b. 性能开关（2026-09-20 第一手实测落地）----------
+# SAGE（H3P_SAGE，默认 1）：
+#   3090(sm86, Ampere) 开 --use-sage-attention 实测
+#     每步   95.94 → 65.02 s/it（采样 1.478×）
+#     单段   14:08 → 10:06（1.40×）
+#   启动日志必须出现 [INFO] Using sage attention —— 若只看到 pytorch/flash 字样即为
+#   静默回退，等于没开（ComfyUI 曾有该行为，必须 grep 日志验证，不看日志不算生效）。
+#   画质：1:1 原生像素逐点对比无可见损失（注意：sage 是数值近似，非 bit-identical，
+#         同 seed 轨迹会有轻微差异，属正常，不是崩坏）。关掉：H3P_SAGE=0
+# HEADROOM（H3P_HEADROOM，默认 0 = 不加该参数）：
+#   DynamicVRAM 额外保留显存防 VRAM↔RAM 抖动。本机渲染峰值 23815/24576 MiB(97%)，
+#   处在抖动风险区，但增益未实测前不默认开启。要试：H3P_HEADROOM=3
+# ASYNCOFF（H3P_ASYNCOFF，默认空 = 不加）：
+#   异步权重卸载流数，有机会把 21GB DiT 的 staging 藏到计算后面。要试：H3P_ASYNCOFF=2
+SAGE_ARGS=()
+[ "${H3P_SAGE:-1}" = "1" ] && SAGE_ARGS=(--use-sage-attention)
+PERF_ARGS=()
+[ "${H3P_HEADROOM:-0}" != "0" ] && PERF_ARGS+=(--vram-headroom "${H3P_HEADROOM}")
+[ -n "${H3P_ASYNCOFF:-}" ] && PERF_ARGS+=(--async-offload "${H3P_ASYNCOFF}")
+
 ARGS=(
   main.py
   --port "$PORT"
@@ -103,6 +123,8 @@ ARGS=(
   --disable-auto-launch
 )
 [ -n "$VRAM_ARGS" ] && ARGS+=("$VRAM_ARGS")
+[ ${#SAGE_ARGS[@]} -gt 0 ] && ARGS+=("${SAGE_ARGS[@]}")
+[ ${#PERF_ARGS[@]} -gt 0 ] && ARGS+=("${PERF_ARGS[@]}")
 
 inf "cd $COMFY && $PY ${ARGS[*]}"
 cd "$COMFY" || exit 1
@@ -126,6 +148,20 @@ for i in $(seq 1 30); do
 done
 (ss -lnt 2>/dev/null || netstat -lnt 2>/dev/null) | grep ":$PORT " | sed 's/^/    /'
 echo
+
+# ---------- 7. 性能开关生效校验（不看日志不算生效）----------
+if [ "${H3P_SAGE:-1}" = "1" ]; then
+  say "[7] SageAttention 生效校验"
+  SAGE_HITS=$(grep -ac "Using sage attention" "$LOG" 2>/dev/null || echo 0)
+  if [ "$SAGE_HITS" -gt 0 ]; then
+    ok "日志确认 Using sage attention ×$SAGE_HITS（真启用，非静默回退）"
+  else
+    bad "日志未见 'Using sage attention' —— SageAttention 未生效！(等于白跑 1.40× 提速)"
+    bad "  排查：venv 里 import sageattention 是否可用 / sm 架构是否被支持"
+    bad "  当前 attention 行："
+    grep -aiE "attention" "$LOG" 2>/dev/null | head -5 | sed 's/^/    /'
+  fi
+fi
 ok "PID=$(cat $PIDFILE)  日志=$LOG"
 echo "  停止：kill \$(cat $PIDFILE)"
 echo "  健康：curl -s http://127.0.0.1:$PORT/system_stats | head -c 300"
