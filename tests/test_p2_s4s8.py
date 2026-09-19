@@ -113,6 +113,38 @@ try:
     written2 = (orch5.out / "prompt" / "seg2.txt").read_text(encoding="utf-8")
     check("T6b 无 h3_prompt 时回落场景叙述", "仅图像层叙述" in written2, written2[:40])
 
+    # ── T7 S4 成功时必须保留段（回归：尾帧判断漏 `not` ⇒ 图全生成却报 0/N）──
+    from PIL import Image as _Image
+    seen_refs = []
+
+    def fake_tt_img(self, out_path, size, prompt, refs=None):
+        seen_refs.append(list(refs or []))
+        p = Path(out_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        _Image.new("RGB", (768, 1344), (205, 205, 205)).save(p)
+        (self.out / "prompt" / (p.stem + ".txt")).write_text(prompt, encoding="utf-8")
+        return str(p)
+
+    job7 = O.Job(product_images=["prod.png"], model_images=["model.png"],
+                 product_text="测试产品")
+    orch7 = O.Orchestrator(job7, tmp / "run7", dry=False)
+    orig_tt = O.Orchestrator.tt_img
+    O.Orchestrator.tt_img = fake_tt_img
+    try:
+        orch7.s4_images([O.Segment(idx=1, seconds=8.0, prompt="镜1画面"),
+                         O.Segment(idx=2, seconds=8.0, prompt="镜2画面")])
+    finally:
+        O.Orchestrator.tt_img = orig_tt
+
+    check("T7 S4 成功时保留段（回归：漏 not ⇒ 0/N）", len(orch7.segments) == 2, len(orch7.segments))
+    check("T7b 每段首尾帧路径已写入", all(x.first and x.last for x in orch7.segments))
+    # 调用顺序受并发影响，且母版（2 参考）/锚定照（1 参考）也在其中 ⇒ 用 any 判定
+    check("T7c 段首帧带身份参考（锚图+模特图+产品图 = 3 张）",
+          any(len(r) == 3 for r in seen_refs),
+          sorted(set(len(r) for r in seen_refs)))
+    check("T7d 段尾帧从首帧同源派生（仅 1 张参考）",
+          any(len(r) == 1 for r in seen_refs))
+
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 

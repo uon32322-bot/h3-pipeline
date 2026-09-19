@@ -300,6 +300,18 @@ def snap_frames(seconds: float, fps: int = 24) -> int:
     return f + (5 - (f % 17)) % 17
 
 
+def _img_ok(p) -> bool:
+    """图片已存在且像真图（>1KB）⇒ 视为可复用。
+
+    幂等设计：断点续跑/重跑不重复烧图（单张 ¥0.0444，批量时差别明显），
+    也避免同一路径被两次并发写坏。
+    """
+    try:
+        return Path(p).exists() and Path(p).stat().st_size > 1024
+    except OSError:
+        return False
+
+
 def log(stage: str, msg: str) -> None:
     print("[%7.1fs] %-6s %s" % (time.time() - T0, stage, msg), flush=True)
 
@@ -586,7 +598,10 @@ class Orchestrator:
 
         # 4a 世界观母版（宫格思维定调：人物/产品/光照/色调）—— 只作母版，绝不进 H3
         master = self.out / "img" / "master.png"
-        self.tt_img(master, CFG["img_size"], "world master sheet, %s" % style, prod_ref + model_ref)
+        if _img_ok(master):
+            log("S4", "  ↺ 复用已有母版 master.png")
+        else:
+            self.tt_img(master, CFG["img_size"], "world master sheet, %s" % style, prod_ref + model_ref)
 
         # 4b 锚定照 ×3：全部从母版同源派生（可 3 路并发）→ 满足官方"3 张独立照"
         anchors = {
@@ -596,8 +611,13 @@ class Orchestrator:
         }
         paths: dict[str, str] = {}
         with cf.ThreadPoolExecutor(max_workers=3) as ex:
-            futs = {k: ex.submit(self.tt_img, self.out / "img" / ("anchor_%s.png" % k),
-                                 CFG["img_size"], p, [str(master)]) for k, p in anchors.items()}
+            futs = {}
+            for k, p in anchors.items():
+                ap_ = self.out / "img" / ("anchor_%s.png" % k)
+                if _img_ok(ap_):
+                    futs[k] = ex.submit(lambda q=ap_: str(q))
+                else:
+                    futs[k] = ex.submit(self.tt_img, ap_, CFG["img_size"], p, [str(master)])
             for k, fu in futs.items():
                 r = fu.result()
                 if r:
@@ -618,14 +638,22 @@ class Orchestrator:
             first = self.out / "img" / ("seg%d_first.png" % seg.idx)
             last = self.out / "img" / ("seg%d_last.png" % seg.idx)
             # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
-            if not self.tt_img(first, CFG["img_size"], "start state: %s" % seg.prompt,
-                               [base] + identity_refs):
-                return False
+            if not _img_ok(first):
+                if not self.tt_img(first, CFG["img_size"], "start state: %s" % seg.prompt,
+                                   [base] + identity_refs):
+                    return False
+            else:
+                log("S4", "  ↺ 复用已有首帧 %s" % first.name)
             # 尾帧：必须从首帧同源派生（跨源会显著掉落点精度）
-            if self.tt_img(last, CFG["img_size"],
-                               "end state, same subject and background: %s" % seg.prompt,
-                               [str(first)]):
-                return False
+            # ⚠️ 这里必须是 `if not ...` —— 漏掉 not 会让「成功」被当成失败，
+            #    表现为图全生成出来了却报 0/N 段（曾真实发生，见 tests T7）
+            if not _img_ok(last):
+                if not self.tt_img(last, CFG["img_size"],
+                                   "end state, same subject and background: %s" % seg.prompt,
+                                   [str(first)]):
+                    return False
+            else:
+                log("S4", "  ↺ 复用已有尾帧 %s" % last.name)
             seg.first, seg.last = str(first), str(last)
             return True
 
