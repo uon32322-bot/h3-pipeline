@@ -122,6 +122,9 @@ CFG = {
     # 视频通道
     "gacha_n": 3,                # 抽卡上限 N<=3
     "comfy_port": 6011,          # 独立实例（不共用 6006）
+    # ⚠️ ComfyUI 的 LoadImage 只接受 --input-directory 白名单内的路径；
+    #    喂白名单外的路径会报 `Invalid image file` 并让整段生成失败（实测全片 4 段全灭）。
+    "h3_input_dir": "/root/autodl-tmp/h3p/input",
     # 闸门② 动作白名单与禁写（与 shotlist_schema.json 的 gate2_merged_rules 同源）
     "action_whitelist": [
         "举起", "并排", "推近", "旋转", "开合", "滑入", "光影流动", "静置", "特写平移",
@@ -478,6 +481,30 @@ class Orchestrator:
             return None
         return str(out_path)
 
+    def _stage_one(self, src: Path, tag: str) -> str | None:
+        """把一张图复制进 ComfyUI 的 input 白名单目录，返回可被 LoadImage 接受的路径。"""
+        try:
+            d = Path(CFG.get("h3_input_dir", "/root/autodl-tmp/h3p/input"))
+            d.mkdir(parents=True, exist_ok=True)
+            dst = d / ("h3stg_%s.png" % tag)
+            shutil.copy2(str(src), str(dst))
+            return str(dst)
+        except Exception as e:
+            log("S6", "⚠️ 暂存失败 %s: %s" % (src, e))
+            return None
+
+    def _stage_for_h3(self, seg: Segment) -> tuple:
+        """把该段首尾帧暂存进 ComfyUI input 目录。
+
+        ⚠️ ComfyUI LoadImage 只接受 --input-directory 白名单内的路径；喂白名单外的
+        路径会报 `Invalid image file`，且**每段都失败但 S7 曾把它当通过**（假通过）。
+        历史 FL2VA 实验能跑通是因为素材本来就在 input/ 下。
+        """
+        if not seg.first or not seg.last:
+            return None, None
+        return (self._stage_one(Path(seg.first), "seg%02d_first" % seg.idx),
+                self._stage_one(Path(seg.last), "seg%02d_last" % seg.idx))
+
     def h3_generate(self, seg: Segment, prefix: str) -> str | None:
         """H3 官方原生链路（3090，:6011）"""
         pf = self.out / "prompt" / ("seg%d.txt" % seg.idx)
@@ -486,12 +513,19 @@ class Orchestrator:
         if self.dry:
             log("S6", "[dry] H3 seg%d seed=%d → %s" % (seg.idx, seg.seed, prefix))
             return str(self.out / "video" / (prefix + "_%06d_.mp4" % seg.seed))
+
+        # ★ 暂存到 ComfyUI 的 input 白名单目录（否则 LoadImage 直接拒收）
+        f1, f2 = self._stage_for_h3(seg)
+        if not f1 or not f2:
+            log("S6", "⚠️ 段%d 首尾帧暂存失败" % seg.idx)
+            return None
         cmd = [sys.executable, str(H3GEN),
-               seg.first, seg.last, str(pf), str(seg.seconds), str(CFG["megapixels"]),
+               f1, f2, str(pf), str(seg.seconds), str(CFG["megapixels"]),
                str(CFG["steps"]), prefix, str(seg.seed), "--port", str(CFG["comfy_port"]),
                "--aspect", CFG["aspect"]]
         for img, sec in seg.mids:
-            cmd += ["--mid", "%s@%s" % (img, sec)]
+            st = self._stage_one(Path(img), "mid%d_%s" % (seg.idx, sec))
+            cmd += ["--mid", "%s@%s" % (st or img, sec)]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
             log("S6", "⚠️ H3 失败：%s" % (r.stdout or r.stderr)[-400:])
@@ -929,6 +963,12 @@ class Orchestrator:
                 if self.dry:
                     seg.frozen = True
                     break
+                # 🔴 没产出视频 = 本次生成失败，必须换 seed 重抽。
+                #    曾把「无视频」交给 s7_judge，而 s7 在缺文件时返回 pass=True
+                #    ⇒ 段被"冻结"成达标（假通过），直到 S8 才炸出来。
+                if not seg.video or not Path(seg.video).exists():
+                    log("S6", "↻ 段%d 第%d次未产出视频 → 换新 seed 重抽" % (seg.idx, attempt))
+                    continue
                 verdict = self.s7_judge(seg)          # 异步解耦：真实部署走队列
                 seg.verdict = verdict
                 if verdict.get("pass"):
@@ -956,8 +996,10 @@ class Orchestrator:
         if self.dry:
             return {"pass": True, "type": "random", "redraw": True, "hidden": True}
         if not seg.video or not Path(seg.video).exists():
-            log("S7", "⚠️ 段%d 视频路径不存在: %s, 跳过判官" % (seg.idx, seg.video))
-            return {"pass": True, "type": "skipped", "redraw": True, "hidden": True, "reason": "no video file"}
+            # 🔴 绝不返回 pass：缺文件是「没生成出来」，不是「判过了」
+            log("S7", "⛔ 段%d 视频路径不存在: %r → 判为失败并请求重抽" % (seg.idx, seg.video))
+            return {"pass": False, "type": "no_video", "redraw": True, "structural": False,
+                    "hidden": True, "reason": "no video file"}
 
         # ffprobe 拿 w/h/frames
         try:
