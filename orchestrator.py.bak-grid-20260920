@@ -108,14 +108,7 @@ CFG = {
     # 首尾帧差异下限（MAE，0–255 尺度）。实测<15 的两段成片开头像静态图、整段几乎无动态。
     # FL2VA 从首帧插值到尾帧，差异太小就没有中间量 ⇒ 必成静态。
     "min_frame_mae": 20.0,
-    "frame_mae_rounds": 2,
-    # ── 宫格模式（09-20 拍板，实证可控）──
-    # True 时 S4 改为「每段生成一张宫格图 → 切片 → 首尾格作锚、中间格作中间锚点」。
-    # 默认 False：保守，不影响现有链路（准则⑩ 保守修复 > 架构改造）。
-    "grid_mode": False,
-    "grid_cols": 2,
-    "grid_rows": 3,
-    "grid_style": "clean bright commercial kitchen product ad, soft natural daylight",        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
+    "frame_mae_rounds": 2,        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
     "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
     # S1 多候选择优：ClipForge 每次生成的质量有随机性（实测同一商品有时 5 场景有时 1 场景），
@@ -540,120 +533,6 @@ def _is_grid_image(p, std_thr: float = 5.0, contrast_thr: float = 30.0,
         return (nh_ >= 2) or (nv_ >= 2) or (nh_ >= 1 and nv_ >= 1)
     except Exception:
         return False
-
-# ═══════════════ 宫格模式（2026-09-20 用户拍板，已实证）═══════════════
-# 一张宫格图承载整段动作：格1=首帧、格N=尾帧、中间格=中间锚点。
-# 实证 GRID6（6 格 / 8s / 4 中间锚点）：帧间差异均值 17.09、近静止帧 0%
-# （对照无锚 10%）；视频在锚点秒的帧与切片原图 MAE 仅 6.6–13.9
-# ⇒ 模型确实逐个穿过锚点 ⇒ 动作可控（非模型自编）。
-# 🔴 红线：宫格**原图绝不进 H3**（官方：video models may reproduce the panel
-#   layout ⇒ 分屏/四宫格/画框被画进成片）。必须切片 + 裁缝 + 统一比例。
-GRID_PROMPT_TPL = (
-    "一张 {rows} 行 {cols} 列的连续动作分解图（storyboard grid），共 {cells} 格，"
-    "格子之间是清晰的白色细缝，每格是一幅独立完整的画面，格子外没有任何画框、边框或文字。"
-    "整张图描述同一个人在同一场景中完成一段连续动作：{action}。"
-    "硬要求：① 每一格里必须始终是同一个人（同一张脸、同一发型）、同一套服装、同一个场景、"
-    "同一件产品、同一光线方向与色调；② 按从左到右、从上到下的顺序，动作依次推进，"
-    "相邻格之间是连贯的中间状态；③ 每格必须有清晰可见的身体动作或手部动作，"
-    "禁止出现只有镜头变化、主体静止不动的格子；④ 每格构图完整，人物与产品不被格子边缘切除；"
-    "⑤ 画面里不要出现任何文字、字幕、水印、logo。整体风格：{style}。"
-)
-
-
-def _grid_mid_anchors(cells: list, seconds: float) -> list:
-    """把中间格均匀映射到片长时间轴（不含首尾格）：间隔 = seconds/(n+1)。"""
-    n = len(cells)
-    if n <= 0:
-        return []
-    return [(str(c), round(seconds * i / (n + 1), 2)) for i, c in enumerate(cells, 1)]
-
-
-def _slice_grid(src, outdir, tag: str, cols: int, rows: int,
-                target_ratio: float = 9 / 16, margin: int = 10) -> list:
-    """宫格图 → 独立完整画面：格线检测 → 逐格裁切 → 裁白缝 → 统一比例。
-
-    返回按阅读顺序（左→右、上→下）的 Path 列表；任何质检不过即返回 []，
-    **绝不把坏切片喂给 H3**。质检：格数==cols*rows / 比例==target_ratio /
-    每格非「整格同色」（空白格）。
-    """
-    try:
-        import numpy as np
-        from PIL import Image
-        src, outdir = Path(src), Path(outdir)
-        outdir.mkdir(parents=True, exist_ok=True)
-        im = Image.open(src).convert("RGB")
-        W, H = im.size
-        a = np.asarray(im.convert("L"), dtype=np.float32)
-
-        def _lines(mat, axis_len, std_thr=6.0, contrast_thr=18.0):
-            sd, mn = mat.std(axis=1), mat.mean(axis=1)
-            med = float(np.median(mn))
-            hit = [i for i in range(3, axis_len - 3)
-                   if sd[i] < std_thr and abs(mn[i] - med) > contrast_thr]
-            g = []
-            for i in hit:
-                if g and i - g[-1][-1] <= 3:
-                    g[-1].append(i)
-                else:
-                    g.append([i])
-            out = [int(np.mean(x)) for x in g]
-            # 去伪线：① 贴边的（画布边缘的高对比行不是格线，实测 y=3 被误当格线）
-            #          ② 与相邻格线过近的（同一格线被拆成两条）
-            lo, hi, gap = 0.02 * axis_len, 0.98 * axis_len, 0.02 * axis_len
-            out = [x for x in out if lo <= x <= hi]
-            merged = []
-            for x in out:
-                if merged and x - merged[-1] < gap:
-                    merged[-1] = (merged[-1] + x) // 2
-                else:
-                    merged.append(x)
-            return merged
-
-        def _bounds(gut, n, total):
-            out = []
-            for e in [round(total * i / n) for i in range(1, n)]:
-                near = [x for x in gut if abs(x - e) < total * 0.12]
-                out.append(int(np.mean(near)) if near else e)
-            return [0] + out + [total]
-
-        gh, gv = _lines(a, H), _lines(a.T, W)
-        # 🔴 格线数必须与请求的行列吻合 —— 否则说明宫格图不是我们要的布局，
-        # 盲目等分会**切穿画面内容**（实测：2×3 的图请求 3×3 会切出 9 格垃圾）。
-        # 必须**精确吻合**：格线少了 ⇒ 会切穿画面内容；格线多了 ⇒ 布局不是我们要的。
-        # （实测「≥n-1」不够严：2×3 的图请求 2×2 也能过，切出来每格含 1.5 格内容）
-        if len(gv) != cols - 1 or len(gh) != rows - 1:
-            log("S4", "⚠️ 宫格线与请求不符：请求 %d×%d（需 %d 竖/%d 横格线），"
-                "实测竖=%d 横=%d ⇒ 拒绝切片（不把坏切片喂给 H3）"
-                % (cols, rows, cols - 1, rows - 1, len(gv), len(gh)))
-            return []
-        ys = _bounds(gh, rows, H)
-        xs = _bounds(gv, cols, W)
-        cells = []
-        for r in range(rows):
-            for c in range(cols):
-                box = (xs[c] + margin, ys[r] + margin,
-                       xs[c + 1] - margin, ys[r + 1] - margin)
-                if box[2] - box[0] < 32 or box[3] - box[1] < 32:
-                    return []
-                ci = im.crop(box)
-                w, h = ci.size
-                if w / h > target_ratio:
-                    nw = int(round(h * target_ratio))
-                    x0 = (w - nw) // 2
-                    ci = ci.crop((x0, 0, x0 + nw, h))
-                else:
-                    nh = int(round(w / target_ratio))
-                    y0 = max(0, (h - nh) // 2)
-                    ci = ci.crop((0, y0, w, y0 + nh))
-                if float(np.asarray(ci.convert("L"), dtype=np.float32).std()) < 4.0:
-                    return []
-                dst = outdir / ("%s_cell%d.png" % (tag, len(cells) + 1))
-                ci.save(dst)
-                cells.append(dst)
-        return cells if len(cells) == cols * rows else []
-    except Exception as e:
-        log("S4", "⚠️ 宫格切片失败：%s" % e)
-        return []
 
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
@@ -1244,41 +1123,6 @@ class Orchestrator:
         return segs
 
     # ---------- S4 ----------
-    def s4_grid(self, seg: Segment, tag: str) -> list:
-        """宫格模式：生成一张承载整段动作的宫格图 → 切片 → 返回各格 Path。
-
-        失败一律返回 []，由调用方回退常规「首帧→尾帧」路径（不熔断）。
-        """
-        cols, rows = int(CFG["grid_cols"]), int(CFG["grid_rows"])
-        gdir = self.out / "img" / "grid"
-        gdir.mkdir(parents=True, exist_ok=True)
-        grid = gdir / ("seg%d_grid.png" % seg.idx)
-        if not _img_ok(grid):
-            prompt = GRID_PROMPT_TPL.format(
-                rows=rows, cols=cols, cells=cols * rows,
-                action=(seg.prompt or "").replace("\n", " ").strip()[:400],
-                style=CFG.get("grid_style", ""))
-            log("S4", "  段%d 生成宫格图 %d×%d…" % (seg.idx, cols, rows))
-            if not self.tt_img(grid, CFG["img_size"], prompt, []):
-                log("S4", "⚠️ 段%d 宫格图生成失败 → 回退常规首尾帧" % seg.idx)
-                return []
-        else:
-            log("S4", "  ↺ 复用已有宫格图 %s" % grid.name)
-        cells = _slice_grid(grid, gdir, tag, cols, rows)
-        if len(cells) != cols * rows:
-            log("S4", "⚠️ 段%d 宫格切片不合格（%d/%d）→ 回退常规首尾帧"
-                % (seg.idx, len(cells), cols * rows))
-            return []
-        # 相邻格差异体检：近似重复格 ⇒ 锚点信息量不足（等同没锚）
-        weak = [_frame_mae(cells[i], cells[i + 1]) for i in range(len(cells) - 1)]
-        log("S4", "  段%d 宫格 %d 格 · 相邻格差异 %s"
-            % (seg.idx, len(cells), " ".join("%.1f" % x for x in weak)))
-        thr = float(CFG.get("min_frame_mae", 20.0)) / 2
-        if min(weak) < thr:
-            log("S4", "⚠️ 段%d 宫格内存在近似重复格（最小 %.1f < %.1f）"
-                "⇒ 中间锚点信息量不足，建议重出宫格" % (seg.idx, min(weak), thr))
-        return cells
-
     def s4_images(self, segments: list[Segment]) -> dict:
         """图像层：母版 → 锚定照×3（并行）→ 每【段】一对首尾帧（同源派生）"""
         log("S4", "图像层（灵炫 TT Image2，云端，与视频通道并行）")
@@ -1331,20 +1175,6 @@ class Orchestrator:
         def build_segment(seg: Segment) -> bool:
             first = self.out / "img" / ("seg%d_first.png" % seg.idx)
             last = self.out / "img" / ("seg%d_last.png" % seg.idx)
-            # ══ 宫格模式（09-20 拍板）══
-            # 一张宫格图 → 切片 → 首格落 first、末格落 last、中间格落 seg.mids。
-            # 本分支只负责**产出**这两个文件：下游门禁①/②、S6 暂存、S5 P-07
-            # 全部复用现有代码（零改动 ⇒ 零回归风险）。失败即回退常规路径。
-            if CFG.get("grid_mode") and not (_img_ok(first) and _img_ok(last)):
-                _cells = self.s4_grid(seg, "seg%02d" % seg.idx)
-                if _cells:
-                    shutil.copyfile(str(_cells[0]), str(first))
-                    shutil.copyfile(str(_cells[-1]), str(last))
-                    seg.mids = _grid_mid_anchors(_cells[1:-1], seg.seconds)
-                    log("S4", "  ✅ 段%d 宫格模式：%d 格 → 首帧/尾帧 + 中间锚点×%d 【%s】"
-                        % (seg.idx, len(_cells), len(seg.mids),
-                           " ".join("%.1fs" % sec for _, sec in seg.mids)))
-                    self.save_state("S4-grid")
             # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
             if not _img_ok(first):
                 if not self.tt_img(first, CFG["img_size"],

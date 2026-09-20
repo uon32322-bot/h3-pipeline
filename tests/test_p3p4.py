@@ -7,7 +7,7 @@ P4 —— H3 prompt 组装官方 FL2VA 三段式：
   T2 三字段顺序固定（integrated_multimodal_description / overall_soundscape /
      non_diegetic_music）
   T3 对齐行 N = 最后一镜序号，S.SS = 总时长两位小数，破折号是 em dash
-  T4 r34l1sm 位于描述字段首位
+  T4 r34l1sm 默认剥离；描述首位须为官方风格词（Live-action）
   T5 台词必须取到（回归：S2 把台词放在 text.voiceover_zh，读错字段 ⇒ 全片失声）
   T6 <d> 规范：说话人身份/says 在 <d> 外，<d> 内只有 [Chinese] + 原样台词
   T7 切镜格式 `At MM:SS.mmm, the camera cuts to`，首镜不带时间戳
@@ -66,9 +66,15 @@ check("T3a 用 em dash（\\u2014）", "\u2014" in lines[0], [c for c in lines[0]
 check("T3b N = 最后一镜序号（2）", "(from Shot 2) aligns with the 16.00-second" in lines[0], lines[0][-90:])
 check("T3c 总时长两位小数 16.00", "16.00-second" in lines[0])
 
-# ── T4 触发词位置 ──
+# ── T4 触发词 r34l1sm：默认**剥离** ──
+# 官方 §4.1 要求 [Shot 1] 首位写「风格」；r34l1sm 是 LoRA 触发词，生产链实测
+# 未挂 realism LoRA（只挂 turbo）⇒ 留在首位会**抢掉官方风格位**且污染正文。
+# 契约：默认剥离；仅当显式挂 LoRA 时才注入首位。
 desc = next(l for l in lines if l.startswith("integrated_multimodal_description:"))
-check("T4 r34l1sm 在描述字段首位", desc.startswith("integrated_multimodal_description: r34l1sm,"), desc[:70])
+check("T4a 默认剥离 r34l1sm（不抢官方风格位）", "r34l1sm" not in desc, desc[:80])
+check("T4b 描述首位是官方风格词 Live-action", 
+      re.search(r"^integrated_multimodal_description:\s*\[Shot 1\]\s*Live-action", desc) is not None,
+      desc[:110])
 
 # ── T5 台词必须取到（关键回归）──
 check("T5a 台词1 进入 prompt", "每天挤地铁耳朵受罪" in p)
