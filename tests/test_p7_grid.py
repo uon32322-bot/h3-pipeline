@@ -236,6 +236,22 @@ check("T17j _vlm_call 支持自定义 system（判官人设不能复用到描述
 check("T17k _vlm_call 支持只要原文 want_json=False", "want_json" in _J)
 check("T17l 默认开启 vl_product_analysis", M.CFG.get("vl_product_analysis") is True)
 
+# ── T18 L1 手持锚（把产品画进手里再喂）──
+check("T18a 新增 handheld 锚定照", '\'handheld\': (' in SRC or '"handheld":' in SRC)
+check("T18b 手持锚 prompt 含「holding the product」", "holding the product naturally in one hand" in SRC)
+check("T18c 手持锚 prompt 要求形态与参考图一致", "identical to the reference" in SRC)
+check("T18d 并发数已从 3 提到 4（4 张锚定照）",
+      "max_workers=4) as ex:\n            futs" in SRC)
+check("T18e base_hand 存在（动作段改用手持锚）", "base_hand" in SRC)
+check("T18f 首帧 prompt 显式要求产品在手中 + 形态锁定",
+      "产品必须被人物的手自然握着" in SRC and "完全一致、不得改动" in SRC)
+check("T18g 默认开启 handheld_anchor", M.CFG.get("handheld_anchor") is True)
+check("T18h 手持锚缺失时有响亮告警", "L1 手持锚缺失" in SRC)
+check("T18i 注释含根因依据（4 条来源）",
+      "求平均" in SRC and "secondary entity" in SRC and "temporal decay" in SRC)
+check("T18j 标注官方对「人物手持产品」零规定（不冒充官方要求）",
+      "零规定" in SRC)
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)

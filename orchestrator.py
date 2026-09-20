@@ -125,6 +125,8 @@ CFG = {
     "grid_min_action_verbs": 2,
     # 产品识别（VL）：让 ClipForge 拿到「真实产品」的文字描述，而非零信息
     "vl_product_analysis": True,
+    # L1：动作段用手持锚（产品画进手里再喂）+ 显式锁定产品形态
+    "handheld_anchor": True,
     "grid_style": "clean bright commercial kitchen product ad, soft natural daylight",        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
     "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
@@ -1649,9 +1651,21 @@ class Orchestrator:
             "main": "hero shot of the product, centered, %s%s" % (style, _ts),
             "material": "macro detail of the product material and texture, %s%s" % (style, _ts),
             "ending": "clean full-frame ending composition, product centered, %s%s" % (style, _ts),
+            # 🔴 L1 一致性锚（2026-09-20 调研依据）：**把产品画进手里再喂**。
+            # 根因（4 条独立来源，非脑补）：① 单目参考对未见视角的外观不完整 ⇒
+            # 产品一转动就暴露参考里没有的区域，"模型会自行发明，但几乎从不准确"
+            # （转 30° 就会出现原帧没有的标签区）；② 条件时间衰减：仅依赖首帧会让
+            # 物体随时间退化（3D RoPE 上 ref token 的 temporal decay）；
+            # ③ 手-物接触区是模型硬伤（物体被当 secondary entity，无法控轨迹）；
+            # ④ 多参考图冲突时模型**求平均** ⇒ 漂移起源。
+            # ⚠️ 官方 9 个 skill 对「人物手持产品」**零规定**（全文无 handheld 条文）
+            # ⇒ 这是官方空白区，只能靠「让参考图本身就包含手持构图」来补。
+            "handheld": ("the same model holding the product naturally in one hand, "
+                         "product fully visible and identical to the reference, "
+                         "waist-up composition, %s%s" % (style, _ts)),
         }
         paths: dict[str, str] = {}
-        with cf.ThreadPoolExecutor(max_workers=3) as ex:
+        with cf.ThreadPoolExecutor(max_workers=4) as ex:
             futs = {}
             for k, p in anchors.items():
                 ap_ = self.out / "img" / ("anchor_%s.png" % k)
@@ -1663,12 +1677,18 @@ class Orchestrator:
                 r = fu.result()
                 if r:
                     paths[k] = r
-        log("S4", "锚定照 %d/3 就绪（同源派生自主视觉母版）" % len(paths))
+        log("S4", "锚定照 %d/%d 就绪（同源派生自主视觉母版）" % (len(paths), len(anchors)))
         if len(paths) < 3:
             log("S4", "⚠️ 锚定照不足 3 张 → 触发熔断降级（形态级弱锚定 / 像素级转混合合成）")
 
         # 4c 每【段】首帧 → 尾帧（段内串行保证同源；不同段之间并行）
         base = paths.get("main") or str(master)
+        # L1：动作段（产品会被手拿着）改用手持锚作 base —— 让参考图自带手持构图
+        base_hand = paths.get("handheld") or base
+        if paths.get("handheld"):
+            log("S4", "  ★L1 手持锚就绪 anchor_handheld.png（动作段将用它作首帧 base）")
+        else:
+            log("S4", "  ⚠️ L1 手持锚缺失 ⇒ 动作段仍用普通锚（产品在手中易漂移）")
 
         # 身份强化参考：母版已含模特/产品，但实测「双参考（模特图+产品图）」对
         # 人物身份与产品语义的保持显著更强。顺序即优先级：锚图在前（构图/场景/光线），
@@ -1694,9 +1714,18 @@ class Orchestrator:
                     self.save_state("S4-grid")
             # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
             if not _img_ok(first):
+                # L1：动作段用「手持锚」作 base，并显式锁定产品在手中 + 形态不变
+                _act, _why = segment_has_action(getattr(seg, "beats", None),
+                                                " ".join([seg.prompt or "", seg.h3_prompt or ""]))
+                _b = base_hand if (_act and CFG.get("handheld_anchor", True)) else base
+                _hand = ("产品必须被人物的手自然握着或正在使用中，"
+                         "产品的外观（形状/颜色/文字/比例/logo 位置）与参考图**完全一致、不得改动**。"
+                         if (_act and CFG.get("handheld_anchor", True)) else "")
+                log("S4", "  段%d 首帧 base=%s（%s）" % (
+                    seg.idx, Path(_b).name, ("动作段·手持锚" if _b == base_hand and _act else "常规")))
                 if not self.tt_img(first, CFG["img_size"],
-                                   "start state: %s。%s" % (seg.prompt, _tone_sfx()),
-                                   [base] + identity_refs):
+                                   "start state: %s。%s%s" % (seg.prompt, _hand, _tone_sfx()),
+                                   [_b] + identity_refs):
                     return False
             else:
                 log("S4", "  ↺ 复用已有首帧 %s" % first.name)
