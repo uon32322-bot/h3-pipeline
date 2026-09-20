@@ -104,6 +104,12 @@ CFG = {
     # 首尾帧「状态变化量」下限：FL2VA 靠两帧之间插值，差异过小 ⇒ 输出近乎静止
     # ⚠️ 阈值尚未用已验收成片标定 ⇒ 只告警（实测 P5 版主体区变化 14–31%）
     "min_state_change": 0.12,
+    # ── 图像层门禁（2026-09-20，见文件内 _frame_mae / _is_grid_image 的说明）──
+    # 首尾帧差异下限（MAE，0–255 尺度）。实测<15 的两段成片开头像静态图、整段几乎无动态。
+    # FL2VA 从首帧插值到尾帧，差异太小就没有中间量 ⇒ 必成静态。
+    "min_frame_mae": 20.0,
+    "frame_mae_rounds": 2,        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
+    "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
     # S1 多候选择优：ClipForge 每次生成的质量有随机性（实测同一商品有时 5 场景有时 1 场景），
     # 跑 N 个候选后按闸门 P3 的 (errors, warnings) 选最优 —— 只挑不改，不创作内容。
@@ -437,6 +443,96 @@ _STATIC_RE = [
 _CAM_ONLY_HINT = ("镜头", "camera", "环绕", "orbiting", "推进", "pushes in",
                   "横移", "tracking shot", "pans", "static")
 
+
+# ═══════════════════ 图像层门禁（2026-09-20）═══════════════════
+# 由来：用户实测反馈 + 第一手量化，两条都必须**在进 GPU 之前**拦掉。
+#
+# 门禁① 首尾帧差异（FL2VA 的命门）
+#   官方 §3.2：FL2VA 描述的是「首帧到尾帧的路径」，模型从首帧插值到尾帧。
+#   实测三段首尾帧 MAE 只有 4.66 / 7.16 / 12.09（0–255 尺度）——
+#   几乎相同 ⇒ 中间没有可插值的变化 ⇒ 成片必然趋近静止。
+#   这正是用户反馈的「每段视频的开始帧都是静态图」「洗碗机镜只是静态图」的首因
+#   （此前误判成「FL2VA 架构固有，无法根除」——错，锚帧差异是可修的）。
+#
+# 门禁② 宫格/拼版
+#   官方 minimalist-product-ad-generator/SKILL.md 铁律逐字：
+#     "Do not create grid layouts, split screens, collage boards, framed panels,
+#      product walls, or storyboard sheets."
+#   机制（官方原话）："video models may reproduce the panel layout"
+#   ⇒ H3 会把宫格版式**复制进成片**（拍出分屏/四宫格/画框/产品墙），
+#     也是「三只手 / 凭空多出手机」那类崩坏的机制之一。宫格图禁止进 H3。
+
+
+def _frame_mae(p1, p2, w: int = 256) -> float:
+    """两帧差异 MAE（0=完全相同；越大=可插值变化越多）。
+
+    测不了时返回 999（**保守放行，不误杀** —— 会杀段的判定必须比放行更保守）。
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+        a = Image.open(p1).convert("RGB")
+        b = Image.open(p2).convert("RGB")
+        if a.size != b.size:
+            b = b.resize(a.size)
+        h = max(1, int(w * a.size[1] / max(a.size[0], 1)))
+        A = np.asarray(a.resize((w, h)), dtype=np.float32)
+        B = np.asarray(b.resize((w, h)), dtype=np.float32)
+        return float(np.abs(A - B).mean())
+    except Exception:
+        return 999.0
+
+
+def _is_grid_image(p, std_thr: float = 5.0, contrast_thr: float = 30.0,
+                   min_span: float = 0.22) -> bool:
+    """宫格/拼版检测：找「贯穿整幅、近乎同色、且与画面中位亮度明显不同」的格线。
+
+    判据（2026-09-20 v2；v1 曾在真实图上误判 —— 洗碗机不锈钢篮架被当格线，
+    而误判会导致整条链路熔断，代价极高）：
+      · 缩到 256 长边；逐行/逐列求 std 与 mean
+      · 格线 = std < std_thr（整行近乎同色）+ |mean − 中位亮度| > contrast_thr
+      · **一条线不算宫格**：(横≥2) 或 (纵≥2) 或 (横≥1 且 纵≥1)
+      · 被线切出的每格边长须 ≥ min_span × 该维度（排除细线/金属丝/纹理）
+    ⇒ 单一连续画面（含强横竖结构如金属篮架）不触发；真正的 2×2 / 1×3 宫格必触发。
+
+    测不了时返回 False（**保守放行，不误杀** —— 会杀段的判定必须比放行更保守）。
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+        im = Image.open(p).convert("L")
+        w, h = im.size
+        if w >= h:
+            nw, nh = 256, max(4, int(256 * h / max(w, 1)))
+        else:
+            nw, nh = max(4, int(256 * w / max(h, 1))), 256
+        a = np.asarray(im.resize((nw, nh)), dtype=np.float32)
+
+        def lines(mat):
+            s_ = mat.std(axis=1)
+            m_ = mat.mean(axis=1)
+            med = float(np.median(m_))
+            hit = [i for i in range(2, len(s_) - 2)
+                   if s_[i] < std_thr and abs(m_[i] - med) > contrast_thr]
+            groups = []
+            for i in hit:
+                if groups and i - groups[-1][-1] <= 2:
+                    groups[-1].append(i)
+                else:
+                    groups.append([i])
+            pos = [g[len(g) // 2] for g in groups]
+            n = len(s_)
+            cuts = [0] + pos + [n - 1]
+            segs = [cuts[k + 1] - cuts[k] for k in range(len(cuts) - 1)]
+            if segs and min(segs) < min_span * n:
+                return 0
+            return len(pos)
+
+        nh_ = lines(a)
+        nv_ = lines(a.T)
+        return (nh_ >= 2) or (nv_ >= 2) or (nh_ >= 1 and nv_ >= 1)
+    except Exception:
+        return False
 
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
@@ -1098,6 +1194,46 @@ class Orchestrator:
                     return False
             else:
                 log("S4", "  ↺ 复用已有尾帧 %s" % last.name)
+            # ── 门禁① 首尾帧差异：太像 ⇒ H3 无中间量可插值 ⇒ 必成静态 ──
+            if CFG.get("min_frame_mae") and not self.dry and _img_ok(first) and _img_ok(last):
+                _done = False
+                for _r in range(1, int(CFG.get("frame_mae_rounds", 2)) + 1):
+                    _m = _frame_mae(first, last)
+                    if _m >= float(CFG["min_frame_mae"]):
+                        log("S4", "  段%d 首尾帧差异 MAE=%.1f ≥ %.0f ✅（有可插值变化）"
+                            % (seg.idx, _m, CFG["min_frame_mae"]))
+                        _done = True
+                        break
+                    log("S4", "⚠️ 段%d 首尾帧差异 MAE=%.1f < %.0f ⇒ 太像，H3 无中间量可插值"
+                              "（成片必近静态）→ 重出尾帧 %d/%d"
+                        % (seg.idx, _m, CFG["min_frame_mae"], _r,
+                           int(CFG.get("frame_mae_rounds", 2))))
+                    try:
+                        last.unlink()
+                    except Exception:
+                        pass
+                    if not self.tt_img(
+                            last, CFG["img_size"],
+                            "end state, CLEARLY DIFFERENT from the start image — the main "
+                            "action has finished: %s。主体姿态、产品状态与构图必须与首帧有"
+                            "明显可见的差异（不是同一姿势的微调）。%s"
+                            % (seg.prompt, _tone_sfx()),
+                            [str(first)]):
+                        return False
+                if not _done:
+                    log("S4", "  ⚠️ 段%d 首尾帧差异到顶仍偏小（MAE=%.1f）—— 已重出 %d 轮，"
+                              "放行但记入报告（保守：不熔断）"
+                        % (seg.idx, _frame_mae(first, last),
+                           int(CFG.get("frame_mae_rounds", 2))))
+
+            # ── 门禁② 宫格/拼版：官方铁律，H3 会把版式复制进成片 ──
+            if CFG.get("grid_gate") and not self.dry:
+                for _tag, _p in (("首帧", first), ("尾帧", last)):
+                    if _img_ok(_p) and _is_grid_image(_p):
+                        raise CircuitBreak(
+                            "段%d %s 疑似宫格/拼版图（%s）—— 官方铁律禁止：视频模型会把"
+                            "版式复制进成片（分屏/四宫格/画框/产品墙），必须重出为单一"
+                            "连续画面。" % (seg.idx, _tag, _p.name))
             seg.first, seg.last = str(first), str(last)
             return True
 
