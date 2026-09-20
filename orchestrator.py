@@ -1317,15 +1317,35 @@ class Orchestrator:
         if not adapter.exists():
             raise CircuitBreak("S1 找不到 clipforge_adapter.py（%s）" % adapter)
         p = self.job.params or {}
+        # ── S0 产品识别(VL)兜底：job 未给品类/描述时，用 VL 结果填 ──
+        #    根因修复：job 常缺 category 且 product_text 为空
+        #    -> 适配器 pick_hook() 恒回落默认钩子池，品类策略(如唇部→H6试色实测)静默失效
+        _vl = {}
+        try:
+            _vlf = self.out / "report" / "product_vl.json"
+            if _vlf.exists():
+                _vl = json.loads(_vlf.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            log("S1", "⚠️ 读取 product_vl.json 失败（品类兜底失效）: %s" % e)
         name = str(p.get("product_name") or "").strip()
         if not name:
+            name = str(_vl.get("name") or "").strip()
+        if not name:
             name = (self.job.product_text or "").split()[0] if self.job.product_text else "未命名产品"
+        _cat = str(p.get("category") or "").strip() or str(_vl.get("category") or "").strip() or "other"
+        _desc = (self.job.product_text or "").strip()
+        if not _desc:
+            _bits = [str(_vl.get(k) or "") for k in ("name", "category", "form", "color")]
+            _bits += [str(x) for x in (_vl.get("visible_features") or [])]
+            _desc = " ".join([b for b in _bits if b]).strip()
+        if _vl:
+            log("S1", "S0 兜底：品类=%s 名称=%s" % (_cat, name))
         out_dir = self.out / "report"
         base_cmd = [sys.executable, str(adapter),
                     "--endpoint", os.environ.get("CLIPFORGE_ENDPOINT", "http://43.136.35.203:3000"),
                     "--name", name,
-                    "--desc", self.job.product_text,
-                    "--category", str(p.get("category", "other")),
+                    "--desc", _desc,
+                    "--category", _cat,
                     "--style", str(p.get("script_style", "pain_point")),
                     "--duration", str(int(p.get("duration", 30))),
                     "--fidelity", self.job.fidelity_class]
@@ -1341,6 +1361,9 @@ class Orchestrator:
             try:
                 r = subprocess.run(base_cmd + ["--out", str(cand_out)],
                                    capture_output=True, text=True, timeout=CFG["s1_timeout_s"])
+                for _ln in (r.stdout or "").splitlines():
+                    if "hook]" in _ln:
+                        log("S1", _ln.strip())
             except subprocess.TimeoutExpired:
                 log("S1", "候选%d 超时（>%ds）" % (k, CFG["s1_timeout_s"]))
                 continue
