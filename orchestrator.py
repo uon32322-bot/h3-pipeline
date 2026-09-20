@@ -1459,7 +1459,10 @@ class Orchestrator:
                     for _i, _b, _raw in _r["misaligned"]:
                         log("S4", "    ❌ 第%d格 与脚本不符（脚本：%s）VLM：%s"
                             % (_i, (_b or "")[:44], _raw[:44]))
-                _minp = 100.0 * float(CFG.get("grid_min_align_pct", 70.0))
+                        # ⚠️ grid_min_align_pct 本身就是「百分比数值」(70)，不要再乘 100
+                # （曾写成 100.0 * ... ⇒ 阈值变 7000% ⇒ 恒 > 实际一致率 ⇒ 每段宫格都被拒，
+                #   整条链路静默退回常规首尾帧 —— 表现为「跑了宫格但没有任何宫格日志」）
+                _minp = float(CFG.get("grid_min_align_pct", 70.0))
                 if _pct < _minp and not self.dry:
                     log("S4", "❌ 段%d 一致性仅 %.0f%% < %.0f%% —— 宫格与脚本不符"
                         "⇒ 拒绝该宫格（回退常规首尾帧，不把错锚点喂给 H3）"

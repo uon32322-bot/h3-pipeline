@@ -178,6 +178,15 @@ check("T13h 导入可执行（真导入而非仅编译）",
         "import sys;sys.path.insert(0,'%s');import orchestrator as o;assert issubclass(o.Gate2Reject,o.CircuitBreak)"
         % ROOT], capture_output=True).returncode == 0)
 
+# ── T14 一致性阈值不能有 ×100 量纲错误 ──
+i = SRC.index("grid_min_align_pct", SRC.index("def s4_grid"))
+seg_src = SRC[SRC.index("def s4_grid"):SRC.index("def s4_images")]
+check("T14a 阈值不再乘 100（会把 70 变成 7000 ⇒ 每段都被误拒）",
+      "100.0 * float(CFG.get(\"grid_min_align_pct\"" not in seg_src, seg_src[-0:] if False else "")
+_mv = M.CFG.get("grid_min_align_pct")
+check("T14b 阈值量纲正确（0<v<=100）", isinstance(_mv, (int, float)) and 0 < float(_mv) <= 100, _mv)
+check("T14c 83%% 这类真实一致率不会被误拒", 83.0 >= float(_mv) - 1e-9, (83.0, _mv))
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)
