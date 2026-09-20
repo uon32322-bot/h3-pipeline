@@ -187,6 +187,29 @@ _mv = M.CFG.get("grid_min_align_pct")
 check("T14b 阈值量纲正确（0<v<=100）", isinstance(_mv, (int, float)) and 0 < float(_mv) <= 100, _mv)
 check("T14c 83%% 这类真实一致率不会被误拒", 83.0 >= float(_mv) - 1e-9, (83.0, _mv))
 
+# ── T15 动作段 vs 静物段判别 ──
+check("T15a 动作 beats ⇒ 判为动作段",
+      M.segment_has_action(["她把杯子放进微波炉", "她关上门按下按钮"], "")[0] is True,
+      M.segment_has_action(["她把杯子放进微波炉", "她关上门按下按钮"], ""))
+_s, _w = M.segment_has_action([], "瓶身是磨砂玻璃质感，银色泵头，柔和的自然光从窗户照进来，背景是虚化的干花")
+check("T15b 静物描述 ⇒ 判为静物段（不走宫格）", _s is False, _w)
+_c, _cw = M.segment_has_action([], "镜头缓慢环绕产品，静置展示，浅景深虚化背景")
+check("T15c 只有镜头运动 ⇒ 判为静物段（洗碗机镜教训）", _c is False, _cw)
+check("T15d 空输入不崩", M.segment_has_action([], "")[0] is False)
+_sb = SRC[SRC.index("def s4_grid"):SRC.index("def s4_images")]
+check("T15e s4_grid 在生成宫格前先判别（省一次灵炫出图）",
+      "segment_has_action" in _sb and _sb.index("segment_has_action") < _sb.index("生成宫格图"))
+check("T15f 默认开启 + 动作词阈值 2",
+      M.CFG.get("grid_require_action") is True and M.CFG.get("grid_min_action_verbs") == 2)
+
+# ── T16 beats 服务端强制（闸门 P3 闸门 H）──
+ADP = (ROOT / "scripts" / "clipforge_adapter.py").read_text(errors="replace")
+check("T16a 适配器有闸门 H", "闸门 H" in ADP)
+check("T16b beats 缺失记为 error（靠择优形成压力）",
+      "缺 beats" in ADP and "errors.append" in ADP.split("缺 beats")[0][-200:])
+check("T16c beats 充足时统计条数", "beats_per_shot" in ADP)
+check("T16d 单镜 beats<2 条给 warning", "少于 2 条" in ADP)
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)

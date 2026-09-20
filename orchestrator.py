@@ -120,6 +120,9 @@ CFG = {
     "grid_consistency_gate": True,
     "grid_min_align_pct": 70.0,
     "grid_judge_workers": 4,
+    # 动作段 vs 静物段判别：静物段（无动作可拆）不走宫格，省一次灵炫出图
+    "grid_require_action": True,
+    "grid_min_action_verbs": 2,
     "grid_style": "clean bright commercial kitchen product ad, soft natural daylight",        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
     "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
@@ -810,6 +813,33 @@ def judge_grid_vs_beats(cells: list, beats: list, workers: int = 4) -> dict:
     return {"checked": checked, "aligned": checked - len(mis),
             "misaligned": mis, "skipped": False}
 
+
+def segment_has_action(beats: list, text: str = "") -> tuple:
+    """该段是否有**可拆解的动作序列** —— 决定走宫格还是常规首尾帧。
+
+    依据（2026-09-20 实测）：美妆类产品特写段的脚本画面是
+    「瓶身是磨砂玻璃质感 / 银色泵头 / 柔和的自然光从右侧窗户照进来 / 背景是虚化的干花」
+    —— 这是**静物描述**，没有动作可拆。硬套宫格只会切出 6 张几乎一样的静物图
+    （退化检测能拦，但那是**事后补救**，还白花一次灵炫出图）。
+    这里在生成宫格**之前**判掉。
+
+    判据：出现 ≥2 个（身体/手部）动作动词 ⇒ 有动作。
+    只有镜头运动词（推近/环绕/静置/特写）**不算**动作 —— 曾实测「洗碗机镜只有
+    镜头环绕、零主体动作」被拍成静态图。
+    """
+    blob = " ".join([text or ""] + [str(b) for b in (beats or [])]).lower()
+    if not blob.strip():
+        return (False, "无文本")
+    acts = {v for v in CFG.get("action_verbs", []) if str(v).lower() in blob}
+    subs = {w for w in CFG.get("subject_action_words", []) if str(w).lower() in blob}
+    hits = sorted(acts | subs)
+    cam = [k for k in ("camera", "镜头", "orbiting", "pushes in", "pans", "static",
+                       "环绕", "推进", "横移", "拉远", "特写", "虚化", "背景",
+                       "散落", "立着", "放着") if k in blob]
+    if len(hits) >= int(CFG.get("grid_min_action_verbs", 2)):
+        return (True, "动作词 %d 个 %s" % (len(hits), hits[:6]))
+    return (False, "仅 %d 个动作词 %s；景物/镜头词 %s ⇒ 静物段" % (len(hits), hits[:4], cam[:6]))
+
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
 
@@ -1413,6 +1443,17 @@ class Orchestrator:
 
         失败一律返回 []，由调用方回退常规「首帧→尾帧」路径（不熔断）。
         """
+        # ── 动作段 vs 静物段判别（2026-09-20）──
+        # 静物段（产品特写：质感/颜色/光线/背景）没有动作可拆，硬套宫格只会
+        # 切出几乎一样的静物图 ⇒ 在**生成宫格之前**就判掉，省一次灵炫出图。
+        if CFG.get("grid_require_action", True):
+            _ok, _why = segment_has_action(
+                getattr(seg, "beats", None),
+                " ".join([seg.prompt or "", getattr(seg, "h3_prompt", "") or ""]))
+            if not _ok:
+                log("S4", "  段%d 判定为【静物段】（%s）⇒ 不走宫格，改用常规首尾帧" % (seg.idx, _why))
+                return []
+            log("S4", "  段%d 判定为【动作段】（%s）⇒ 走宫格" % (seg.idx, _why))
         cols, rows = int(CFG["grid_cols"]), int(CFG["grid_rows"])
         gdir = self.out / "img" / "grid"
         gdir.mkdir(parents=True, exist_ok=True)

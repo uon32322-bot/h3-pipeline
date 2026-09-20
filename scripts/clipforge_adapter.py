@@ -264,6 +264,23 @@ def gate_p3(shots: list[dict], requested_duration: float | None = None) -> dict:
             warnings.append("镜%d 与镜%d 画面描述完全相同 → 相邻镜必须至少变一项（景别/机位/场景）"
                             % (shots[i - 1].get("idx", i), shots[i].get("idx", i + 1)))
 
+    # ── 闸门 H：结构化分格动作序列 beats（宫格模式的输入契约）──
+    # 为什么是 error 而不是 warning：beats 缺失时宫格只能靠「兜底推导」，
+    # 而推导是从**画面描述**里切，产品特写段切出来的是「瓶身是磨砂玻璃质感」
+    # 这类静物碎片 ⇒ 宫格与脚本必然不符。
+    # 记 error 会让「多候选择优」优先挑带 beats 的候选 ⇒ 形成**真实压力**，
+    # 比在 prompt 里写一句「要求」有效（实测重启后仍 0/4 镜输出 beats）。
+    _no_beat = [s["idx"] for s in shots if not (s.get("beats") or [])]
+    if _no_beat:
+        errors.append("镜 %s 缺 beats（结构化分格动作序列）—— 宫格模式将退化为"
+                      "兜底推导（从画面描述切，会得到静物碎片）" % _no_beat)
+    else:
+        _nb = [len(s.get("beats") or []) for s in shots]
+        stats["beats_per_shot"] = _nb
+        if min(_nb) < 2:
+            warnings.append("镜 %s 的 beats 少于 2 条，宫格可能拆不出完整动作流"
+                            % [i + 1 for i, v in enumerate(_nb) if v < 2])
+
     # ── 闸门 G：总时长与请求值偏差（结构层对齐检查）──
     if requested_duration and shots:
         total = shots[-1].get("end", 0.0)
