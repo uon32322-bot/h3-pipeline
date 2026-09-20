@@ -1202,6 +1202,8 @@ class Orchestrator:
                 "purpose": "", "visual": sh["visual"], "camera": cam,
                 # 🔴 h3_prompt 与 visual 分家：前者只进视频层，后者只进图像层
                 "h3_prompt": sh.get("h3_prompt", ""),
+                # 结构化分格动作序列（来自脚本）：宫格模式逐格指定用
+                "beats": sh.get("beats") or [],
                 "text": {"onscreen_en": "", "voiceover_zh": sh["line"], "post_zh": ""},
             })
         for w in warns:
@@ -1319,8 +1321,10 @@ class Orchestrator:
             else:
                 # 官方 FL2VA 三段式（用逐镜 visual + line 组装，不丢内容）
                 seg_h3 = build_h3_prompt(g, total)
+            # 段内各镜的 beats 顺序拼接 = 该段的动作流（供宫格逐格指定）
+            _seg_beats = [b for r in g for b in (r.get("beats") or []) if str(b).strip()]
             segs.append(Segment(idx=gi, seconds=total, prompt="\n".join(lines),
-                                h3_prompt=seg_h3))
+                                h3_prompt=seg_h3, beats=_seg_beats))
         log("S3.5", "分组：%d 镜 → %d 段（S=%d；平均段长 %.2fs，上限 %.0fs）" % (
             len(rows), len(segs), len(segs),
             sum(s.seconds for s in segs) / max(len(segs), 1), CFG["seg_max_seconds"]))
@@ -1348,6 +1352,9 @@ class Orchestrator:
             _src = "脚本 beats" if len(_beats) >= _need else "兜底推导"
             if len(_beats) < _need:
                 _beats = derive_beats((seg.prompt or "").replace("\n", " "), _need)
+            _beats = _beats[:_need]          # 超出格数要截断，否则模板多出行
+            if len(_beats) < _need:          # 兜底仍不足则补齐
+                _beats = (_beats + (_beats[-1:] or [""]) * _need)[:_need]
             log("S4", "  段%d 分格动作序列（%s）：%s"
                 % (seg.idx, _src, " ｜ ".join("%d.%s" % (i, b[:34]) for i, b in enumerate(_beats, 1))))
             prompt = GRID_PROMPT_TPL.format(

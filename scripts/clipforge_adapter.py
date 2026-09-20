@@ -352,6 +352,11 @@ def to_side_a(resp: dict, *, product_name: str, category: str = "other",
             "end": round(t + dur, 3),
             "visual": visual,
             "h3_prompt": h3_prompt,
+            # 结构化分格动作序列：每镜 2–3 条「谁+可见动作+对象+结束状态」，
+            # 供宫格模式逐格指定（让灵炫照抄，而不是从散文里自己分格）
+            "beats": [str(x).strip() for x in (
+                s.get("beats") if isinstance(s.get("beats"), list)
+                else ([s["beats"]] if s.get("beats") else [])) if str(x).strip()],
             "camera": normalize_camera(s.get("camera", "")),
             "_cf_type": s.get("type", ""),          # 保留 ClipForge 语义，供判官/统计用
             "_cf_visual_source": s.get("visualSource", ""),
