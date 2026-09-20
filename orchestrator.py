@@ -1054,7 +1054,9 @@ def build_h3_prompt(shots: list, seconds: float,
 #   根因: 硬写 "The woman (S1) says naturally" 但画面常无人 -> H3 只能做画外音
 # ══════════════════════════════════════════════════════════════════
 _PERSON_WORDS = ("woman", "man", "model", "person", "girl", "guy",
-                 "her face", "his face", "she ", " he ", "smiling", "smile")
+                 "her face", "his face", "she ", " he ", "smiling", "smile",
+                 # 中文（seg.prompt 常为中文）
+                 "正脸", "看镜头", "看着镜头", "对着镜头", "口播", "脸部", "微笑", "笑容")
 # 纯手部/纯静物镜不算"有可对口型的主体"
 _HAND_ONLY_WORDS = ("close-up of a hand", "hands only", "hand holding",
                     "fingers", "wrist", "no one is visible", "unmanned")
@@ -1821,14 +1823,27 @@ class Orchestrator:
             # 首帧：锚图 + 身份参考（每段都从锚图重新出发 ⇒ 跨段不累积漂移）
             if not _img_ok(first):
                 # L1：动作段用「手持锚」作 base，并显式锁定产品在手中 + 形态不变
+                _segtext = " ".join([seg.prompt or "", seg.h3_prompt or "",
+                                     " ".join(getattr(seg, "beats", None) or [])])
                 _act, _why = segment_has_action(getattr(seg, "beats", None),
                                                 " ".join([seg.prompt or "", seg.h3_prompt or ""]))
-                _b = base_hand if (_act and CFG.get("handheld_anchor", True)) else base
-                _hand = ("产品必须被人物的手自然握着或正在使用中，"
-                         "产品的外观（形状/颜色/文字/比例/logo 位置）与参考图**完全一致、不得改动**。"
-                         if (_act and CFG.get("handheld_anchor", True)) else "")
-                log("S4", "  段%d 首帧 base=%s（%s）" % (
-                    seg.idx, Path(_b).name, ("动作段·手持锚" if _b == base_hand and _act else "常规")))
+                # 口播镜优先：有正脸的段用主锚（含人物正脸）——对口型需要参考图自带人物脸
+                _face = _has_on_camera_face(_segtext)
+                if _face:
+                    _b = base
+                    _hand = ("人物必须正面对着镜头、面部清晰可见（用于口播对口型），"
+                             "产品在手中或靠近面部，其外观（形状/颜色/文字/比例）与参考图**完全一致**。")
+                    _bkind = "口播镜·主锚(含正脸)"
+                elif _act and CFG.get("handheld_anchor", True):
+                    _b = base_hand
+                    _hand = ("产品必须被人物的手自然握着或正在使用中，"
+                             "产品的外观（形状/颜色/文字/比例/logo 位置）与参考图**完全一致、不得改动**。")
+                    _bkind = "动作段·手持锚"
+                else:
+                    _b = base
+                    _hand = ""
+                    _bkind = "常规"
+                log("S4", "  段%d 首帧 base=%s（%s）" % (seg.idx, Path(_b).name, _bkind))
                 if not self.tt_img(first, CFG["img_size"],
                                    "start state: %s。%s%s" % (seg.prompt, _hand, _tone_sfx()),
                                    [_b] + identity_refs):
