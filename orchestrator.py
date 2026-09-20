@@ -569,6 +569,13 @@ def derive_beats(prompt: str, n: int) -> list:
     txt = (prompt or "").strip()
     if not txt or n <= 0:
         return []
+    # 🔴 先剥掉结构标记：seg.prompt 是**组装后的多镜文本**，含 [Shot N] / At MM:SS.mmm，
+    #    直接按逗号切会切出「暖光特写 [Shot 2] At 00:03.042 产品静置」这种垃圾
+    #    （实测于 dry 跑）。剥净后剩下的才是真动作描述。
+    txt = re.sub(r"\[\s*Shot\s*\d+\s*\]", "，", txt)
+    txt = re.sub(r"At\s+\d{1,2}:\d{2}\.\d{2,3}", "，", txt)
+    txt = re.sub(r"\[Chinese\][^，,。;；]*", "，", txt)   # 台词不进画面动作
+    txt = re.sub(r"\s+", " ", txt).strip()
     parts = [x.strip() for x in re.split(r"[，,。；;]+", txt) if x.strip()]
     if not parts:
         return [txt] * n
@@ -760,7 +767,10 @@ def judge_grid_vs_beats(cells: list, beats: list, workers: int = 4) -> dict:
     """
     import base64
     try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        _p = Path(__file__).resolve().parent
+        for _c in (_p, _p / "scripts"):      # 双布局兜底（同上）
+            if _c.exists() and str(_c) not in sys.path:
+                sys.path.insert(0, str(_c))
         from judge_l2 import _vlm_call          # 复用：模型白名单 + 关思考链 + 退避
     except Exception as e:
         log("S4", "⚠️ 一致性门禁不可用（judge_l2 导入失败：%s）⇒ 跳过" % e)
@@ -1822,7 +1832,12 @@ class Orchestrator:
             return {"pass": True, "type": "skipped", "redraw": True, "hidden": True, "reason": "ffprobe: " + str(e)}
 
         # 调 judge_shot.py（warn_only=True = 不阻塞）
-        judge_script = Path(__file__).parent / "judge_shot.py"
+        # 🔴 双布局兜底：orchestrator 可能位于仓库根，也可能位于 scripts/。
+        #    只写 Path(__file__).parent 时，运行「根副本」会解析到不存在的
+        #    <root>/judge_shot.py ⇒ 判官全失败 ⇒ 段永远不冻结 ⇒ 无限重渲烧 GPU。
+        _d = Path(__file__).resolve().parent
+        judge_script = next((c for c in (_d / "judge_shot.py", _d / "scripts" / "judge_shot.py")
+                             if c.exists()), _d / "judge_shot.py")
         # L2 判官的 R 段判据来自该镜 prompt 原文；S6 已把每段 h3_prompt 写到
         # out/prompt/segN.txt。缺文件时 judge_shot 会自动跳过 L2 并告警。
         seg_prompt = self.out / "prompt" / ("seg%d.txt" % seg.idx)
@@ -2053,6 +2068,14 @@ DEMO_JOB = {
 
 
 def main() -> int:
+    # 环境变量启用宫格模式（避免动 argparse；等价于 CFG["grid_mode"]=True）
+    if os.environ.get("H3P_GRID", "").lower() not in ("", "0", "false", "no"):
+        CFG["grid_mode"] = True
+    # 演示/测试可用更少的格子（如 2x2=4 格），省时间
+    for _k, _env in (("grid_cols", "H3P_GRID_COLS"), ("grid_rows", "H3P_GRID_ROWS"),
+                     ("grid_min_align_pct", "H3P_GRID_MIN_ALIGN")):
+        if os.environ.get(_env):
+            CFG[_k] = float(os.environ[_env]) if _k.endswith("pct") else int(os.environ[_env])
     ap = argparse.ArgumentParser()
     ap.add_argument("--job", help="job.json 路径")
     ap.add_argument("--outdir", default=None, help="输出目录（默认 <项目根>/out/<job_id>）")
