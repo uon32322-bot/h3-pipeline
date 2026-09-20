@@ -156,6 +156,11 @@ CFG = {
     ],
     # 动作链步数上限：超过即判「一拍多步」→ 必须拆镜或只留一步主动作
     "max_action_steps": 2,
+    # 官方 §4.1：关键帧任务从参考图推导风格。我们的锚定图是真实感实拍风 → Live-action
+    "h3_style": "Live-action, cinematic",
+    # LoRA 触发词（r34l1sm 等）：**默认空=不注入**（无对应 LoRA 时是孤儿 token，
+    # 且会抢官方要求的「[Shot 1] 首位写风格」位置）。挂了 realism LoRA 再填。
+    "h3_trigger_words": "",
     # true = 动作链超限直接否决；false(默认) = 仅告警（因为要修得动提示词源头，
     # 而 ClipForge 侧的单动作约束尚未落地 ⇒ 先可见、不阻断，等源头修好再开）
     "gate2_action_strict": False,
@@ -433,6 +438,24 @@ _CAM_ONLY_HINT = ("镜头", "camera", "环绕", "orbiting", "推进", "pushes in
                   "横移", "tracking shot", "pans", "static")
 
 
+def _strip_inline_voiceover(desc: str) -> str:
+    """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
+
+    实测 ClipForge 的 h3_prompt 自带形如
+        A voiceover says in Chinese: "……" while no one is visible in the frame.
+    而我们的组装器**又**追加了 `The woman (S1) says naturally: <d>[Chinese] …</d>`
+    ⇒ 台词出现两次，且第一处不符合官方 <d> 规范（也会让模型把同一句话念两遍）。
+    """
+    import re as _re
+    pat = _re.compile(
+        r'\s*(?:A |The )?(?:voiceover|narrator|off-screen voice|woman|man)\s+'
+        r'(?:says|says in [A-Za-z ]+|narrates)[^.!?]{0,80}?[:：]\s*'
+        r'[""\u201c][^""\u201d]{1,200}[""\u201d]'
+        r'(?:\s*while[^.!?]{0,80}?\bframe\.?)?',
+        _re.I)
+    return pat.sub("", desc).strip()
+
+
 def _motion_boost(desc: str, subject_words: list) -> tuple:
     """对单镜描述做运动增强。返回 (新描述, 命中的增强项列表)。"""
     out = desc
@@ -448,15 +471,29 @@ def _motion_boost(desc: str, subject_words: list) -> tuple:
     # ② 只有镜头运动、无主体动作 → 追加主体动作要求
     has_subject = any(w.lower() in low for w in subject_words)
     cam_only = any(k.lower() in low for k in _CAM_ONLY_HINT)
+    # ⚠️ 语言必须与正文一致：官方要求正文用英文，早期版本给英文 prompt 追加中文
+    #    句子 ⇒ 中英混排（实测验证时抓到）。按 CJK 占比判定语言。
+    # ⚠️ 只看**前 200 字**：正文里可能内嵌中文台词（"A voiceover says in Chinese: …"），
+    #    用全文 CJK 占比会把英文正文误判成中文（实测踩过，导致给英文 prompt 追加中文句）。
+    _head = out[:200]
+    _cjk = sum(1 for c in _head if "\u4e00" <= c <= "\u9fff")
+    zh = _cjk > max(4, len(_head) * 0.10)
     if cam_only and not has_subject:
         out = out.rstrip("。. ") + (
             "。同时主体必须持续有可见动作：产品表面的光随动作流动、"
-            "蒸汽/液体/材质高光在整段内连续变化，不得出现完全静止的画面。")
+            "蒸汽/液体/材质高光在整段内连续变化，不得出现完全静止的画面。"
+            if zh else
+            ", while the subject itself keeps moving continuously: light slides across "
+            "the product surface, steam, liquid or material highlights shift throughout "
+            "the shot, and the frame is never completely still.")
         hits.append("补主体动作")
-    # ③ FL2VA 固有静启 → 明确要求立即起势
+    # ③ FL2VA 固有静启 → 明确要求立即起势（官方 §3.2：observable intermediate changes）
     out = out.rstrip("。. ") + (
-        "。动作从本镜第 0 秒就开始，不要留静止开场；"
-        "整段画面必须持续变化直到结尾。")
+        "。动作从本镜第 0 秒就开始，不要留静止开场；整段画面必须持续变化直到结尾。"
+        if zh else
+        ", and the motion starts at the very first frame of this shot: the action is "
+        "already under way at 0.00 seconds, never holding still, and the frame keeps "
+        "changing visibly until the cut.")
     hits.append("加立即起势")
     return out, hits
 
@@ -465,48 +502,78 @@ def build_h3_prompt(shots: list, seconds: float,
                     soundscape: str = "", music: str = "N/A") -> str:
     """把逐镜内容组装成官方 FL2VA 三段式 prompt。
 
-    依据官方 skills/h3-prompt-writing/references/base-en.txt：
-      - FL2VA 第一行必须是「对齐指令」，随后**一个空行**
-        （N = 最后一镜序号，S.SS = 总时长两位小数；破折号是 em dash）
-      - 三字段顺序固定：integrated_multimodal_description / overall_soundscape /
-        non_diegetic_music
-      - 切镜写 `At MM:SS.mmm, the camera cuts to ...`，首镜不写时间戳
-      - 说话人：身份短语写在 <d> **外**，<d> 内只有语言标签 + 原样台词
-      - 相机运动写成句子里的自然英语，不堆标签
-      - LoRA 触发词 r34l1sm 置于描述字段首位
+    **严格对齐**官方 skills/h3-prompt-writing/references/base-en.txt：
+
+    §2.1 首行 = 对齐指令（逐字），后接**一个空行**；N=最后一镜序号、S.SS 两位小数。
+    §2.2 三字段固定顺序：integrated_multimodal_description / overall_soundscape /
+         non_diegetic_music。
+    §3.2 FL2VA 金样例结构（本函数核心）：
+         · [Shot 1] 开头**先写整体风格 + 初始构图**
+         · 紧跟 **显式锚定首帧**：beginning in the position and framing established by Picture 1
+         · 中间变化用**连续时序从句**（as / while / until / then）+ 可观察状态；
+           单镜内**不写时间戳**（官方金样例单镜内无时间戳）
+         · **显式锚定尾帧**（放在描述末尾）：settles into the pose, spacing, and
+           composition established by Picture 2 at the end of the shot.
+         · 每个细节都必须对应可见/可听之物（禁参数堆砌、禁抽象词）
+    §4.2 镜间切换才用时间戳：[Shot 2] At 00:03.500, the camera cuts to …；首镜不加。
+    §4.4 说话人：身份短语写在 <d> 外，<d> 内只有语言标签 + 原样台词。
+    §4.3 相机运动 = 类型 + 幅度 + 速度（自然英语，不是标签堆叠）。
+
+    r34l1sm：既违反官方「[Shot 1] 首位写风格」，又是孤立 token（实测 A/B 产物内嵌的
+    ComfyUI 图里未加载任何 realism LoRA）⇒ **默认剥离**（不论来自 ClipForge 还是本地）。
+    真挂了 realism LoRA 时用 CFG["h3_trigger_words"] 打开，会插到风格之后。
     """
     n = max(1, len(shots))
     align = ("How the reference pictures align with the target video \u2014 "
              "Picture 1 (from Shot 1) aligns with the 0.00-second mark of the target video; "
              "Picture 2 (from Shot %d) aligns with the %.2f-second mark of the target video."
              % (n, seconds))
+    style = CFG.get("h3_style", "Live-action, cinematic")
+    tw = (CFG.get("h3_trigger_words") or "").strip()
     parts = []
     for i, sh in enumerate(shots, 1):
-        vis = (sh.get("visual") or "").strip()
-        vis, _mh = _motion_boost(vis, CFG.get('subject_action_words', []))
+        # 视频层优先用 ClipForge 的英文 h3_prompt（本为 H3 而写、符合官方「正文用英文」），
+        # 退而用图像层 visual（中文）。历史缺陷：一直用中文 visual 当正文 ⇒ 违反官方
+        # Output Rules「Write rewrite sections in English」。
+        vis = (sh.get("h3_prompt") or sh.get("visual") or "").strip()
+        # 剥离孤儿触发词（源文本常自带 "r34l1sm, "）
+        if not tw:
+            for _t in ("r34l1sm,", "r34l1sm"):
+                if vis[:len(_t) + 1].lower().startswith(_t):
+                    vis = vis[len(_t):].lstrip(" ,")
+        elif tw not in vis:
+            vis = "%s, %s" % (tw, vis)
+        vis = _strip_inline_voiceover(vis)
+        vis, _mh = _motion_boost(vis, CFG.get("subject_action_words", []))
         if _mh:
-            log('S2', '镜%d 运动增强: %s' % (i, ','.join(_mh)))
-        # ⚠️ S2 节拍表把台词放在 text.voiceover_zh（不是顶层 line）——
-        #    读错字段会让组装出的 prompt 丢掉全部台词 ⇒ 成片静音。
-        line = (sh.get("line")
-                or (sh.get("text") or {}).get("voiceover_zh")
-                or "").strip()
+            log("S2", "镜%d 运动增强: %s" % (i, ",".join(_mh)))
+        # 注意：S2 节拍表把台词放在 text.voiceover_zh（不是顶层 line）；
+        # 读错字段会让组装出的 prompt 丢掉全部台词 ⇒ 成片静音。
+        line = (sh.get("line") or (sh.get("text") or {}).get("voiceover_zh") or "").strip()
+        # 标点清理：中文句号 → 英文；折叠双逗号；去尾部逗号
+        vis = (vis.replace("。", ".").replace("，，", ",").replace(",,", ",")
+                  .replace(" ,", ",").replace(" .", ".").strip().rstrip(",; "))
+        vis = " ".join(vis.split())   # 折叠多余空白（不用 re，模块未导入）
+        if i == n:
+            # §3.2 尾帧锚定（照官方金样例句式），贴在描述末尾
+            vis += (", then settles into the pose, spacing, and composition "
+                    "established by Picture 2 at the end of the shot")
         if i == 1:
-            piece = "[Shot 1] %s" % vis
+            # §4.1 先写风格与初始构图 → §3.2 紧跟首帧锚定 → 正文
+            piece = "[Shot 1] %s, beginning in the position and framing established by Picture 1. %s" % (style, vis)
         else:
             at = float(sh.get("start", 0.0))
             mm, ss = int(at // 60), at % 60
-            piece = ("[Shot %d] At %02d:%06.3f, the camera cuts to %s" % (i, mm, ss, vis))
+            piece = "[Shot %d] At %02d:%06.3f, the camera cuts to %s" % (i, mm, ss, vis)
         if line:
             piece += (" The woman (S1) %s: <d>[Chinese] %s</d>"
                       % (CFG.get("h3_voice_style", "says naturally"), line))
         parts.append(piece)
-    desc = "r34l1sm, " + " ".join(parts)
     return ("%s\n\nintegrated_multimodal_description: %s\n\noverall_soundscape: %s\n\n"
             "non_diegetic_music: %s"
-            % (align, desc, soundscape or CFG.get("h3_soundscape_default", ""),
+            % (align, " ".join(parts),
+               soundscape or CFG.get("h3_soundscape_default", ""),
                music or CFG.get("h3_music_default", "N/A")))
-
 
 def _tone_sfx(enable: bool = True) -> str:
     """P5 统一视觉基准后缀（母版/锚定照/段首尾帧共用）。"""
