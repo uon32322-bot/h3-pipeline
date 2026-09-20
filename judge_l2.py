@@ -127,6 +127,15 @@ VLM_SYS = (
 
 
 # ------------------------------------------------------------------- 工具
+# ---------------------------------------------------------------- 输出约定
+# 🔴 2026-09-20 修复：**stdout 只能留给最终 JSON**。
+#    l2() 的逐项进度行原本打到 stdout，被 judge_shot.py 继承后与最终 JSON 混在
+#    一起 ⇒ 编排器 json.loads(stdout) 直接抛 JSONDecodeError ⇒ 段被判「随机型失败」
+#    重抽，每段白跑 10 分钟。实测已在生产链复现（S7 解析失败 → S6 重抽 1/3）。
+#    ⇒ 一切进度/告警一律走 stderr。
+def _eprint(*a, **k):
+    print(*a, file=sys.stderr, **k)
+
 def run(cmd, **kw):
     return subprocess.run(cmd, capture_output=True, **kw)
 
@@ -511,11 +520,11 @@ def _vlm_call(frames_b64, claim, retries=5, think=False):
             else:
                 wait = 2.0 ** (i + 1)
             if i < retries - 1:
-                print("       ⚠️ VLM 调用失败(%s%s) → %.1fs 后重试 %d/%d"
+                _eprint("       ⚠️ VLM 调用失败(%s%s) → %.1fs 后重试 %d/%d"
                       % (type(e).__name__, "/%s" % code if code else "",
                          wait, i + 1, retries - 1), flush=True)
                 time.sleep(wait)
-    print("       ✗ VLM 调用最终失败：%s" % str(last)[:180], flush=True)
+    _eprint("       ✗ VLM 调用最终失败：%s" % str(last)[:180], flush=True)
     return {"verdict": "na", "evidence": {"frame": None, "region": None},
             "confidence": "low", "_error": str(last)[:200]}
 
@@ -586,7 +595,7 @@ def l2(path, shot_prompt, segs, n_frames=6, workers=4, think=False, votes=3):
             "error_votes": err_votes,
             "error": (best.get("error") if all_err else None),
         })
-        print("   L2 %-5s %-3s  票 %s" % (iid, top, out[-1]["votes"]), flush=True)
+        _eprint("   L2 %-5s %-3s  票 %s" % (iid, top, out[-1]["votes"]), flush=True)
     return out
 
 
@@ -694,49 +703,49 @@ def main():
     segs = [s.strip() for s in a.items.split(",")]
     shot_prompt = open(a.prompt, encoding="utf-8").read().strip()
 
-    print("=" * 74)
-    print("判官团逐镜评分 · %s" % a.name)
-    print("  片源 %s" % a.video)
-    print("  判据 %s" % a.prompt)
-    print("  背景声明 %s ｜ L2 思考链 %s ｜ L2 并发 %d ｜ L2 投票 %d 票/项" %
+    _eprint("=" * 74)
+    _eprint("判官团逐镜评分 · %s" % a.name)
+    _eprint("  片源 %s" % a.video)
+    _eprint("  判据 %s" % a.prompt)
+    _eprint("  背景声明 %s ｜ L2 思考链 %s ｜ L2 并发 %d ｜ L2 投票 %d 票/项" %
           ({"studio": "studio 平面静态影棚（L1-11 启用）",
             "outdoor": "outdoor 户外（L1-11 na）",
             "macro": "macro 微距特写（L1-11 na）"}[a.bg],
            "开" if a.think else "关", a.workers, a.votes))
-    print("=" * 74)
+    _eprint("=" * 74)
 
-    print("[L0] 技术校验（纯算术）")
+    _eprint("[L0] 技术校验（纯算术）")
     r0 = l0(a.video)
     for r in r0:
-        print("   %-6s %-3s" % (r["id"], r["verdict"]))
+        _eprint("   %-6s %-3s" % (r["id"], r["verdict"]))
     cuts = tuple(float(x) for x in a.cuts.split(",") if x.strip())
-    print("[L1] 本地检测器（Mac CPU）"
+    _eprint("[L1] 本地检测器（Mac CPU）"
           + ("　｜已声明切点 %s s" % list(cuts) if cuts else ""))
     r1 = l1(a.video, a.first, cuts, bg=a.bg)
     for r in r1:
-        print("   %-6s %-3s  value=%s thr=%s" %
+        _eprint("   %-6s %-3s  value=%s thr=%s" %
               (r["id"], r["verdict"], r["evidence"]["value"], r["evidence"]["threshold"]))
     r2 = []
     if not a.dry:
-        print("[L2] 远端 VLM 判官（%s，%d 项并发）" % (VLM_MODEL, a.workers))
+        _eprint("[L2] 远端 VLM 判官（%s，%d 项并发）" % (VLM_MODEL, a.workers))
         r2 = l2(a.video, shot_prompt, segs, n_frames=a.frames, workers=a.workers,
                 think=a.think, votes=a.votes)
     else:
-        print("[L2] 已跳过（--dry）")
+        _eprint("[L2] 已跳过（--dry）")
 
     res = r0 + r1 + r2
     agg = aggregate(res, low_conf_is_veto=a.lowconf_veto)
-    print("-" * 74)
-    print("聚合判定: %s" % agg["verdict"])
+    _eprint("-" * 74)
+    _eprint("聚合判定: %s" % agg["verdict"])
     for x in agg["reasons"]:
-        print("   ✗ " + x)
+        _eprint("   ✗ " + x)
     for x in agg.get("remedies", []):
-        print("   ↳ 处置: " + x)
+        _eprint("   ↳ 处置: " + x)
     for x in agg["warnings"]:
-        print("   ⚠ " + x)
+        _eprint("   ⚠ " + x)
     if agg["verdict"] == "PASS":
-        print("   ✅ 该镜通过判官团，可冻结")
-    print("-" * 74)
+        _eprint("   ✅ 该镜通过判官团，可冻结")
+    _eprint("-" * 74)
 
     report = {"shot": a.name, "video": a.video, "prompt_file": a.prompt,
               "judge_model": VLM_MODEL, "ts": time.strftime("%F %T"),
@@ -744,7 +753,7 @@ def main():
     outp = a.out or (os.path.splitext(a.video)[0] + "_judge.json")
     with open(outp, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    print("报告 → %s" % outp)
+    _eprint("报告 → %s" % outp)
     return 0 if agg["verdict"] == "PASS" else 1
 
 

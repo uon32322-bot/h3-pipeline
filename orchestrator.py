@@ -1036,40 +1036,81 @@ class Orchestrator:
 
     # ---------- S6 ----------
     def s6_generate(self) -> None:
-        log("S6", "H3 生成（3090 官方 FL2VA，唯一瓶颈，串行）")
+        """H3 生成；**判官与渲染并行重叠**（2026-09-20 提速）
+
+        实测依据（3 段片，第一手）：
+            段1 渲染 608s(10:08) + 判官 497s(8:17)；段2 渲染 605s + 判官 378s；
+            段3 渲染 605s + 判官 533s  ⇒ 全链 54.8 分钟，其中 ~24 分钟 GPU 空转。
+        原因：判官（L0 算术 + L1 本机 CPU + L2 远端 VLM）**完全不占 GPU**（实测判官
+        期间 GPU 利用率 0%），却被串行执行；而 H3 渲染才是唯一占 GPU 的环节。
+        ⇒ 改为「段N 渲染完立即异步提交判官，不等结果就去渲染段N+1」，只留最后一段的
+          判官尾巴，同样 3 段片预计 54.8 → 约 35-37 分钟（墙钟 ≈1.5×）。
+
+        语义**保持不变**（只改调度，不改任何判据）：
+          · 每段仍最多 gacha_n 次抽卡，每次都换新 seed
+          · 结构型失败仍立即 CircuitBreak（禁止重抽）
+          · 到顶仍明确报失败，绝不静默续跑
+        唯一差异：重抽被推迟到「本轮全部渲染完之后」的下一轮 —— 因为必须先拿到判官
+        结果才知道要不要重抽。即失败代价从「每段串行 +18min」变成「按轮次批量重抽」。
+        """
+        from concurrent.futures import ThreadPoolExecutor
+        log("S6", "H3 生成（3090 官方 FL2VA）｜★判官与渲染并行重叠")
         for seg in self.segments:
-            # ★闸门③ 派发前硬校验（节选可自动化的两条）
             if not seg.first or not seg.last:
                 raise CircuitBreak("段%d 缺首/尾帧，禁止派发" % seg.idx)
-            log("S6", "段%d：%.2fs / %d 帧 / 首尾帧齐备" % (seg.idx, seg.seconds, snap_frames(seg.seconds)))
-            for attempt in range(1, CFG["gacha_n"] + 1):
-                seg.attempts = attempt
-                seg.seed = int(time.time() * 1000) % (2 ** 31) + attempt * 7919  # 必须换新 seed
-                seg.video = self.h3_generate(seg, "video/H3_SEG%d" % seg.idx) or ""
-                if self.dry:
-                    seg.frozen = True
+
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="judge")
+        futs = {}
+        try:
+            for rnd in range(1, CFG["gacha_n"] + 1):
+                todo = [x for x in self.segments if not x.frozen]
+                if not todo:
                     break
-                # 🔴 没产出视频 = 本次生成失败，必须换 seed 重抽。
-                #    曾把「无视频」交给 s7_judge，而 s7 在缺文件时返回 pass=True
-                #    ⇒ 段被"冻结"成达标（假通过），直到 S8 才炸出来。
-                if not seg.video or not Path(seg.video).exists():
-                    log("S6", "↻ 段%d 第%d次未产出视频 → 换新 seed 重抽" % (seg.idx, attempt))
-                    continue
-                verdict = self.s7_judge(seg)          # 异步解耦：真实部署走队列
-                seg.verdict = verdict
-                if verdict.get("pass"):
-                    seg.frozen = True
-                    log("S6", "✅ 段%d 达标并冻结（第 %d 次）" % (seg.idx, attempt))
-                    break
-                if not verdict.get("redraw"):
-                    log("S6", "🚫 段%d 结构型失败 → 禁止重抽，须走三出路（规避/转嫁/拆解）" % seg.idx)
-                    raise CircuitBreak("段%d 结构型失败，回闸门② 改设计" % seg.idx)
-                log("S6", "↻ 段%d 随机型失败 → 换新 seed 重抽（%d/%d）" % (
-                    seg.idx, attempt, CFG["gacha_n"]))
-            else:
-                raise CircuitBreak("段%d 到顶失败（N=%d），明确报失败，禁止静默续跑" % (seg.idx, CFG["gacha_n"]))
-            self.append_run(stage="S6", seg=seg.idx, seed=seg.seed,
-                            attempts=seg.attempts, video=seg.video, verdict=seg.verdict)
+                log("S6", "第 %d 轮渲染：%d 段待出" % (rnd, len(todo)))
+                for seg in todo:
+                    seg.attempts = rnd
+                    seg.seed = int(time.time() * 1000) % (2 ** 31) + rnd * 7919  # 必须换新 seed
+                    log("S6", "段%d：%.2fs / %d 帧 / 首尾帧齐备"
+                        % (seg.idx, seg.seconds, snap_frames(seg.seconds)))
+                    seg.video = self.h3_generate(seg, "video/H3_SEG%d" % seg.idx) or ""
+                    if self.dry:
+                        seg.frozen = True
+                        continue
+                    # 🔴 没产出视频 = 本次生成失败，必须换 seed 重抽（不得交给判官，
+                    #    历史教训：s7 在缺文件时返回 pass=True ⇒ 假通过冻结到达标）
+                    if not seg.video or not Path(seg.video).exists():
+                        log("S6", "↻ 段%d 第%d次未产出视频 → 下轮换 seed 重抽" % (seg.idx, rnd))
+                        continue
+                    # ⭐ 立即异步提交判官，**不等结果** → 与下一段渲染重叠
+                    futs[seg.idx] = pool.submit(self.s7_judge, seg)
+                    self.append_run(stage="S6", seg=seg.idx, seed=seg.seed,
+                                    attempts=seg.attempts, video=seg.video, verdict=None)
+                # 本轮渲染全部完成后统一收集判官结果（此刻大部分判官已在后台跑完）
+                for seg in todo:
+                    if self.dry:
+                        continue
+                    fut = futs.pop(seg.idx, None)
+                    if fut is None:
+                        continue                     # 本轮未产出 → 下轮重抽
+                    verdict = fut.result()
+                    seg.verdict = verdict
+                    if verdict.get("pass"):
+                        seg.frozen = True
+                        log("S6", "✅ 段%d 达标并冻结（第 %d 次）" % (seg.idx, rnd))
+                        continue
+                    if not verdict.get("redraw"):
+                        log("S6", "🚫 段%d 结构型失败 → 禁止重抽，须走三出路（规避/转嫁/拆解）"
+                            % seg.idx)
+                        raise CircuitBreak("段%d 结构型失败，回闸门② 改设计" % seg.idx)
+                    log("S6", "↻ 段%d 随机型失败 → 下轮换 seed 重抽（已用 %d/%d）"
+                        % (seg.idx, rnd, CFG["gacha_n"]))
+            if not self.dry:
+                for seg in self.segments:
+                    if not seg.frozen:
+                        raise CircuitBreak("段%d 到顶失败（N=%d），明确报失败，禁止静默续跑"
+                                           % (seg.idx, CFG["gacha_n"]))
+        finally:
+            pool.shutdown(wait=True)
         self.save_state("S6")
 
     # ---------- S7 ----------
@@ -1124,7 +1165,16 @@ class Orchestrator:
                 log("S7", "⚠️ 段%d 判官执行失败 (rc=%d): %s" % (seg.idx, r.returncode, r.stderr[-300:]))
                 return {"pass": False, "type": "judge_error", "redraw": True, "hidden": True,
                         "structural": False, "reason": "judge_shot rc=" + str(r.returncode)}
-            result = json.loads(r.stdout)
+            # stdout 只应有 JSON；但为防第三方进度行混入（历史上踩过：
+            # L2 进度行污染 stdout → JSONDecodeError → 每段白跑 10 分钟重抽），
+            # 这里做一次稳健提取：先直接解析，失败则取最后一个顶层 JSON 对象。
+            try:
+                result = json.loads(r.stdout)
+            except json.JSONDecodeError:
+                _i = r.stdout.find("{")
+                if _i < 0:
+                    raise
+                result = json.loads(r.stdout[_i:])
             s = result.get("summary", {})
             lm = result.get("l2_meta", {}) or {}
             log("S7", "段%d 判官: pass=%s raw_pass=%s yes=%d no=%d na=%d structural=%d "
