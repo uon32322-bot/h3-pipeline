@@ -43,6 +43,17 @@ from pathlib import Path
 
 # ── P3 闸门阈值（与 orchestrator CFG 同源，改这里要同步改那边）─────────────
 FPS = 24
+# 念白实际字数：剥离 [pause] 等方括号标记与空白（标记不发音，但占时间另算）
+_SPEECH_MARK_RE = re.compile(r"\[[^\]]{1,20}\]|\([^\)]{1,20}\)|【[^】]{1,20}】")
+
+
+def speech_chars(line: str) -> int:
+    """返回真正会被念出来的字符数（去掉 [pause]/（停顿）等表演标记与空白）。"""
+    if not line:
+        return 0
+    t = _SPEECH_MARK_RE.sub("", str(line))
+    return len(re.sub(r"\s+", "", t))
+
 CHARS_PER_SEC = 3.9          # 实测：中文口播 3.9 字/秒 → 镜长 × 3.9 = 台词字数预算
 MIN_COVERAGE = 0.80          # 台词覆盖率下限（低于此值会出现空档）
 
@@ -227,12 +238,12 @@ def gate_p3(shots: list[dict], requested_duration: float | None = None) -> dict:
         # ── 闸门 C：台词覆盖率（空档根因）──
         if dur > 0 and line:
             budget = dur * CHARS_PER_SEC
-            cov = len(line) / budget if budget else 0
+            cov = speech_chars(line) / budget if budget else 0
             coverages.append(cov)
             if cov < MIN_COVERAGE:
                 warnings.append(
                     "镜%d 台词 %d 字 / 预算 %.0f 字（覆盖 %.0f%%）→ 可能有 %.1fs 空档"
-                    % (idx, len(line), budget, cov * 100, dur * (1 - cov)))
+                    % (idx, speech_chars(line), budget, cov * 100, dur * (1 - cov)))
             if cov > 1.25:
                 # 🔴 2026-09-20 用户拍板：从 warning 升级为 **error**（强制重写而非放行）。
                 # 依据：实测 4 镜里 3 镜超标 135–147% ⇒ 音频必然被截断，是「念不完 /
@@ -242,7 +253,7 @@ def gate_p3(shots: list[dict], requested_duration: float | None = None) -> dict:
                 errors.append(
                     "镜%d 台词 %d 字 超出预算 %.0f 字（%.0f%%）→ 必被截断，须压缩到 "
                     "%d 字以内（%.1f 字/秒 × %.1fs）"
-                    % (idx, len(line), budget, cov * 100,
+                    % (idx, speech_chars(line), budget, cov * 100,
                        int(budget), CHARS_PER_SEC, dur))
 
         # ── 闸门 D：画面内文字（字幕/价签/评价页会烧进成片）──
@@ -410,7 +421,18 @@ def fetch_clipforge(endpoint: str, *, name: str, desc: str, category: str = "oth
     if _hspec:
         print(f"[hook] 选定钩子 = {_hook['id']} {_hook['名称']}")
     # 钩子规格放最前 —— ClipForge route.ts 只取前 2000 字符，追加末尾会被静默截断
-    _req = (_hspec + "\n\n" + (extra_requirements or "").strip()).strip()
+    # ── 台词长度硬约束（与 P3 闸门同口径 3.9 字/秒）──
+    #    根因：闸门只在验收层拦，生成层从未告知 ClipForge 字数上限
+    _per_shot_s = 8.0
+    _budget = int(3.9 * _per_shot_s)
+    _n_shots = max(1, int(round(float(duration) / _per_shot_s)))
+    _specline = (
+        "【台词长度硬约束（必须遵守，否则被截断）】"
+        "每镜台词不超过 %d 字（按 %.1f 字/秒 × %.1fs 计算）；"
+        "全片约 %d 镜；宁可少说也不要超，超出的部分会被直接截断。"
+        % (_budget, 3.9, _per_shot_s, _n_shots)
+    )
+    _req = (_hspec + "\n\n" + _specline + "\n\n" + (extra_requirements or "").strip()).strip()
     if _req:
         _req = _req[:2000]
         payload["customRequirements"] = _req
