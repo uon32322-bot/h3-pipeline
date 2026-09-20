@@ -144,6 +144,19 @@ check("T11b beats 不足才兜底推导", "derive_beats" in sb and "_need" in sb
 check("T11c beat_lines 进入模板渲染", "beat_lines=beat_lines" in sb)
 check("T11d Segment 有 beats 字段", "beats: list[str]" in SRC)
 
+# ── T12 一致性门禁（B）：逐格核画面 vs 脚本该格动作 ──
+check("T12a judge_grid_vs_beats 存在", "def judge_grid_vs_beats" in SRC)
+i = SRC.index("def s4_grid"); sb = SRC[i:SRC.index("def s4_images")]
+check("T12b 门禁接在 s4_grid 切片之后", "judge_grid_vs_beats(cells" in sb)
+check("T12c 一致性不达标 => 拒绝该宫格（return []）",
+      "拒绝该宫格" in sb and "return []" in sb.split("拒绝该宫格")[1][:400])
+check("T12d VLM 未判成 => skipped，不算通过", "不算通过" in SRC and "skipped" in SRC)
+check("T12e 门禁默认开启 + 阈值 70%",
+      M.CFG.get("grid_consistency_gate") is True and M.CFG.get("grid_min_align_pct") == 70.0,
+      (M.CFG.get("grid_consistency_gate"), M.CFG.get("grid_min_align_pct")))
+check("T12f 复用 judge_l2 的 _vlm_call（不另起一路模型）",
+      "from judge_l2 import _vlm_call" in SRC)
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)

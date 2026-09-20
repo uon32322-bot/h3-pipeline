@@ -116,6 +116,10 @@ CFG = {
     "grid_mode": False,
     "grid_cols": 2,
     "grid_rows": 3,
+    # 一致性门禁（B）：逐格核宫格画面 vs 脚本该格动作，不符则拒绝该宫格
+    "grid_consistency_gate": True,
+    "grid_min_align_pct": 70.0,
+    "grid_judge_workers": 4,
     "grid_style": "clean bright commercial kitchen product ad, soft natural daylight",        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
     "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
@@ -742,6 +746,56 @@ def check_grid_prompt(action: str = "把杯子放进微波炉加热后取出",
         return ["模板渲染失败：%s" % e]
     return ["缺【%s】(%s)" % (sub, why) for sub, why in GRID_PROMPT_REQUIRED
             if sub not in txt]
+
+
+# ═══════════ 一致性门禁（B，2026-09-20）：宫格每格 vs 脚本该格动作 ═══════════
+# 由来：A 让脚本产出逐格动作、宫格模板逐格指定，但**灵炫仍可能画错**（漏画/画成
+# 另一个动作/合并格子）。没有这道门禁，"输入灵炫的一致性"只是意愿、不是保证。
+# 复用 judge_l2._vlm_call（同一模型白名单/关思考链/退避重试），逐格做二值判定。
+def judge_grid_vs_beats(cells: list, beats: list, workers: int = 4) -> dict:
+    """逐格核「这格画面」是否与「脚本指定的该格动作」一致。
+
+    返回 {checked, aligned, misaligned:[(格号, 脚本动作, VLM 原答)], skipped}
+    导入失败/全部判不成 ⇒ skipped=True（**不阻塞链路**，但响亮告警）。
+    """
+    import base64
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from judge_l2 import _vlm_call          # 复用：模型白名单 + 关思考链 + 退避
+    except Exception as e:
+        log("S4", "⚠️ 一致性门禁不可用（judge_l2 导入失败：%s）⇒ 跳过" % e)
+        return {"checked": 0, "aligned": 0, "misaligned": [], "skipped": True}
+
+    def _one(i):
+        beat = beats[i] if i < len(beats) else ""
+        try:
+            b64 = base64.b64encode(Path(cells[i]).read_bytes()).decode()
+        except Exception as e:
+            return (i, None, "读图失败:%s" % e)
+        claim = ("这张图是一组分镜图里的第 %d 格。只回答 yes 或 no，不要解释。\n"
+                 "问题：这一格画面中的动作，与下面这句脚本指定的动作是否一致？\n"
+                 "脚本指定：%s\n"
+                 "判据：只要画面明显看不出这个动作、或做的是另一个动作、或这一格是"
+                 "空白/纯背景而看不出人，就答 no。" % (i + 1, beat or "（脚本未指定）"))
+        try:
+            r = _vlm_call([b64], claim, retries=2)
+        except Exception as e:
+            return (i, None, "异常:%s" % e)
+        low = str(r).lower()
+        v = "yes" if "yes" in low else ("no" if "no" in low else None)
+        return (i, v, str(r)[:70])
+
+    with cf.ThreadPoolExecutor(max_workers=max(1, int(workers))) as ex:
+        rows = list(ex.map(_one, range(len(cells))))
+    mis = [(i + 1, beats[i] if i < len(beats) else "", raw)
+           for i, v, raw in rows if v == "no"]
+    checked = sum(1 for _, v, _ in rows if v in ("yes", "no"))
+    if checked == 0:
+        log("S4", "⚠️ 一致性门禁：%d 格一格都没判成（VLM 全失败）⇒ **不算通过**，"
+            "按未校验处理（不静默放行）" % len(cells))
+        return {"checked": 0, "aligned": 0, "misaligned": [], "skipped": True}
+    return {"checked": checked, "aligned": checked - len(mis),
+            "misaligned": mis, "skipped": False}
 
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
@@ -1372,6 +1426,27 @@ class Orchestrator:
             log("S4", "⚠️ 段%d 宫格切片不合格（%d/%d）→ 回退常规首尾帧"
                 % (seg.idx, len(cells), cols * rows))
             return []
+        # ── 一致性门禁（B）：逐格核「画面 vs 脚本该格动作」──
+        if CFG.get("grid_consistency_gate", True) and _beats:
+            _r = judge_grid_vs_beats(cells, _beats, workers=int(CFG.get("grid_judge_workers", 4)))
+            _al = _r.get("aligned", 0); _ck = _r.get("checked", 0)
+            if _r.get("skipped"):
+                log("S4", "⚠️ 段%d 一致性门禁未生效（VLM 未判成）—— 宫格按**未校验**放行，"
+                    "但记入报告" % seg.idx)
+            else:
+                _pct = 100.0 * _al / max(1, _ck)
+                log("S4", "  段%d 一致性门禁：%d/%d 格与脚本动作一致（%.0f%%）"
+                    % (seg.idx, _al, _ck, _pct))
+                if _r["misaligned"]:
+                    for _i, _b, _raw in _r["misaligned"]:
+                        log("S4", "    ❌ 第%d格 与脚本不符（脚本：%s）VLM：%s"
+                            % (_i, (_b or "")[:44], _raw[:44]))
+                _minp = 100.0 * float(CFG.get("grid_min_align_pct", 70.0))
+                if _pct < _minp and not self.dry:
+                    log("S4", "❌ 段%d 一致性仅 %.0f%% < %.0f%% —— 宫格与脚本不符"
+                        "⇒ 拒绝该宫格（回退常规首尾帧，不把错锚点喂给 H3）"
+                        % (seg.idx, _pct, _minp))
+                    return []
         # 相邻格差异体检：近似重复格 ⇒ 锚点信息量不足（等同没锚）
         weak = [_frame_mae(cells[i], cells[i + 1]) for i in range(len(cells) - 1)]
         log("S4", "  段%d 宫格 %d 格 · 相邻格差异 %s"
