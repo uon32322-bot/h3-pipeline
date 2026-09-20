@@ -142,6 +142,41 @@ CFG = {
     "forbidden_by_generability": [
         "双主体精确交互", "内部心理活动", "否定式动作", "一拍三步动作链",
     ],
+
+    # ── 2026-09-20 新增：从「真实事故」反推的两张表 ──────────────────────
+    # 事故：段2 的镜描述「放入微波炉、按下按钮、取出、放桌上」= 5 步动作链，
+    #       8 秒内模型跳步压缩 ⇒ 拍出「微波炉门还没开、杯子已经在里面」。
+    # 事故：段1/段3 末尾写「then the shot holds for about two seconds」+ 只描述
+    #       镜头运动（static camera / slow orbiting camera）而主体无动作
+    #       ⇒ 成片开头像静态图、洗碗机镜完全没有动态。
+    "forbidden_static_phrases": [
+        "holds for about", "hold for about", "stays still", "remains motionless",
+        "does not move", "stands motionless", "保持静止", "静置不动",
+        "then the shot holds", "画面定格", "静止不动",
+    ],
+    # 动作链步数上限：超过即判「一拍多步」→ 必须拆镜或只留一步主动作
+    "max_action_steps": 2,
+    # true = 动作链超限直接否决；false(默认) = 仅告警（因为要修得动提示词源头，
+    # 而 ClipForge 侧的单动作约束尚未落地 ⇒ 先可见、不阻断，等源头修好再开）
+    "gate2_action_strict": False,
+    # ⚠️ 不要用连接词计数：中文用逗号串联动作（实测段2「放入微波炉，按下按钮加热牛奶，
+    #    取出后…放在桌上」连接词 0 个 ⇒ 会漏判）。改为**动作动词去重计数**。
+    "action_verbs": [
+        "放入", "放进", "取出", "拿起", "端起", "放下", "放在", "按下", "打开", "关上",
+        "倒入", "倒出", "搅拌", "擦拭", "冲洗", "翻转", "加热", "拧开", "盖上", "装满",
+        "舀出", "涂抹", "挤压", "递出", "举起", "拆开", "组装", "连接", "插入",
+        "picks up", "puts in", "places", "takes out", "sets down", "presses", "opens",
+        "closes", "pours", "stirs", "wipes", "washes", "lifts", "carries", "inserts",
+        "unplugs", "plugs", "assembles", "twists",
+    ],
+    # 主体动作词：h3_prompt 若只有镜头运动而全无这些词 ⇒ 判「无主体动作」
+    "subject_action_words": [
+        "hand", "hands", "fingers", "picks", "places", "puts", "lifts", "pours",
+        "stirs", "turns", "opens", "closes", "presses", "wipes", "washes", "holds",
+        "carries", "sets", "gently moves", "steam rises", "liquid", "pours out",
+        "手", "拿起", "放下", "倒入", "搅拌", "打开", "关上", "按下", "擦拭",
+        "冲洗", "端起", "放进", "取出", "冒着", "流动", "缓缓",
+    ],
 }
 
 # ─── 画布几何：图片尺寸由 aspect 推导（根治「两个字段各填各的」）───
@@ -380,6 +415,52 @@ def parse_h3_output(stdout: str, comfy_out, prefix: str, not_before: float = 0.0
     return out
 
 
+
+# ───────────────────────── 运动增强（2026-09-20）─────────────────────────
+# 由来：夜审实测确认三类「画面不动」的成因，均在 prompt 层可干预：
+#   ① 静止/定格写法（"then the shot holds for about two seconds"）→ 直接删
+#   ② 只有镜头运动、无主体动作（"镜头缓慢环绕马克杯"）⇒ 成片就是一张会平移的
+#      静态图（用户实测："洗碗机冲洗的画面只是静态图，没有动态"）
+#   ③ FL2VA 架构固有：第一帧就是锚定图，模型从静止起步（用户实测："每段视频
+#      的开始帧都是静态图"）—— 只能靠「立即起势」措辞缓解，无法根除
+_STATIC_RE = [
+    "then the shot holds for about two seconds", "then the shot holds",
+    "the shot holds for about two seconds", "holds for about two seconds",
+    "and holds for about two seconds", "stays still", "remains motionless",
+    "保持静止", "画面定格", "静止不动",
+]
+_CAM_ONLY_HINT = ("镜头", "camera", "环绕", "orbiting", "推进", "pushes in",
+                  "横移", "tracking shot", "pans", "static")
+
+
+def _motion_boost(desc: str, subject_words: list) -> tuple:
+    """对单镜描述做运动增强。返回 (新描述, 命中的增强项列表)。"""
+    out = desc
+    hits = []
+    low = out.lower()
+    # ① 剔除静止/定格写法
+    for ph in _STATIC_RE:
+        if ph in out or ph.lower() in low:
+            import re as _re
+            out = _re.sub(_re.escape(ph), "", out, flags=_re.I)
+            hits.append("去静止写法:%s" % ph)
+            low = out.lower()
+    # ② 只有镜头运动、无主体动作 → 追加主体动作要求
+    has_subject = any(w.lower() in low for w in subject_words)
+    cam_only = any(k.lower() in low for k in _CAM_ONLY_HINT)
+    if cam_only and not has_subject:
+        out = out.rstrip("。. ") + (
+            "。同时主体必须持续有可见动作：产品表面的光随动作流动、"
+            "蒸汽/液体/材质高光在整段内连续变化，不得出现完全静止的画面。")
+        hits.append("补主体动作")
+    # ③ FL2VA 固有静启 → 明确要求立即起势
+    out = out.rstrip("。. ") + (
+        "。动作从本镜第 0 秒就开始，不要留静止开场；"
+        "整段画面必须持续变化直到结尾。")
+    hits.append("加立即起势")
+    return out, hits
+
+
 def build_h3_prompt(shots: list, seconds: float,
                     soundscape: str = "", music: str = "N/A") -> str:
     """把逐镜内容组装成官方 FL2VA 三段式 prompt。
@@ -402,6 +483,9 @@ def build_h3_prompt(shots: list, seconds: float,
     parts = []
     for i, sh in enumerate(shots, 1):
         vis = (sh.get("visual") or "").strip()
+        vis, _mh = _motion_boost(vis, CFG.get('subject_action_words', []))
+        if _mh:
+            log('S2', '镜%d 运动增强: %s' % (i, ','.join(_mh)))
         # ⚠️ S2 节拍表把台词放在 text.voiceover_zh（不是顶层 line）——
         #    读错字段会让组装出的 prompt 丢掉全部台词 ⇒ 成片静音。
         line = (sh.get("line")
@@ -760,16 +844,59 @@ class Orchestrator:
 
     # ---------- S3 ----------
     def s3_gate2(self, rows: list[dict]) -> list[dict]:
-        """★闸门②：白名单 + 可验证物理结果 + 四类禁写 + 每镜动作数=1（含"B 类不可验证化"降级）"""
-        rejected = []
+        """★闸门②：白名单 + 可验证物理结果 + 四类禁写 + **每镜动作数=1**（2026-09-20 真实现）
+
+        🔴 两处「声明了但没实现」的修复：
+          ① docstring 一直写着「每镜动作数=1」，原实现只做两轮子串匹配 ⇒ 动作链检查
+             **从未实现**。真实事故：段2 写「放入微波炉、按下按钮、取出、放桌上」5 步，
+             8 秒内模型跳步压缩 ⇒ 成片「微波炉门还没开、杯子已经在里面」。
+          ② 只扫 r["visual"]（图像层），**不扫实际喂 H3 的文本** ⇒ 闸门覆盖的字段与
+             实际执行字段不是同一个（真实事故：段1/3 只描述镜头运动 + 末尾定格写法
+             ⇒ 成片开头像静态图、洗碗机镜完全无动态）。
+        """
+        rejected, warns = [], []
         for r in rows:
-            blob = r["visual"]
+            # 合并「真正会进 GPU 的文本」：visual（图像层）+ h3_prompt（视频层）+ 台词
+            blob = " ".join([r.get("visual", "") or "",
+                             r.get("h3_prompt", "") or "",
+                             ((r.get("text") or {}).get("voiceover_zh") or "")])
+            low = blob.lower()
+
             for bad in CFG["forbidden_by_physics"]:
                 if bad in blob:
                     rejected.append((r["idx"], "含可验证物理结果「%s」" % bad))
             for bad in CFG["forbidden_by_generability"]:
                 if bad in blob:
                     rejected.append((r["idx"], "命中四类禁写「%s」" % bad))
+
+            # ── 静止/定格写法：直接导致「开头像静态图」「整镜无动态」──
+            for bad in CFG.get("forbidden_static_phrases", []):
+                if (bad in blob) or (bad.lower() in low):
+                    _m = "含静止/定格写法「%s」⇒ 成片会像静态图" % bad
+                    # 已在 build_h3_prompt 里自动剔除；此处仅确认它没有漏网进 GPU
+                    (rejected if CFG.get("gate2_static_strict") else warns).append(
+                        (r["idx"], _m) if CFG.get("gate2_static_strict") else "镜%d %s" % (r["idx"], _m))
+
+            # ── 每镜动作数=1：动作动词去重计数（中文用逗号串联，不能靠连接词）──
+            hits = sorted({v for v in CFG.get("action_verbs", []) if v.lower() in low})
+            if len(hits) > CFG.get("max_action_steps", 2):
+                _m = ("一拍内动作链约 %d 步 %s（上限 %d）⇒ 模型会跳步/顺序错乱"
+                      % (len(hits), hits[:6], CFG.get("max_action_steps", 2)))
+                if CFG.get("gate2_action_strict"):
+                    rejected.append((r["idx"], _m))
+                else:
+                    warns.append("镜%d %s" % (r["idx"], _m))
+
+            # ── 主体动作缺失：只有镜头运动、无任何主体动作词 ⇒ 画面近乎静止 ──
+            has_subject = any(w.lower() in low for w in CFG.get("subject_action_words", []))
+            cam_only = any(k in low for k in (
+                "camera", "镜头", "orbiting", "pushes in", "tracking shot", "pans",
+                "static", "环绕", "推进", "横移"))
+            if cam_only and not has_subject:
+                warns.append("镜%d 只有镜头运动、缺主体动作 ⇒ 极易拍成静态画面" % r["idx"])
+
+        for w in warns:
+            log("S3", "⚠️ 闸门② " + (w if isinstance(w, str) else "%s" % (w,)))
         if rejected:
             for idx, why in rejected:
                 log("S3", "❌ 镜%d 被闸门② 否决：%s" % (idx, why))
@@ -779,7 +906,8 @@ class Orchestrator:
             if not self.dry:
                 raise CircuitBreak("闸门② 否决 %d 行，须退回重写" % len(rejected))
         else:
-            log("S3", "✅ ★闸门② 全镜通过")
+            log("S3", "✅ ★闸门② 全镜通过（含 动作数≤%d / 无静止写法 / 主体动作存在）"
+                % CFG.get("max_action_steps", 2))
         self.save_state("S3")
         return rows
 
