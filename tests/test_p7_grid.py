@@ -115,6 +115,35 @@ check("T6c 宫格原图仅用于切片（s4_grid 内），不赋值给 seg.first
 # ── T7 保守默认 ──
 check("T7 grid_mode 默认 False（零回归）", M.CFG.get("grid_mode") is False, M.CFG.get("grid_mode"))
 
+# ── T8 分格动作序列（第4步：准确性/一致性根）──
+b = M.derive_beats("她把杯子放进微波炉，关上门，按下按钮，等待加热，取出杯子，捧在手里微笑", 6)
+check("T8a 推导出 6 格动作", len(b) == 6, b)
+check("T8b 各格内容互不相同（真分格，非复制）", len(set(b)) >= 4, b)
+check("T8c 首格=放入的动作", "放进微波炉" in b[0], b[0])
+b2 = M.derive_beats("只有一个动作", 3)
+check("T8d 句子不足时按格数补齐（不崩）", len(b2) == 3, b2)
+check("T8e 空输入 → 空列表", M.derive_beats("", 6) == [])
+
+lines = M.beat_lines(b, 6)
+check("T9a 每格一行且编号 1..6", all(("第%d格：" % i) in lines for i in range(1, 7)))
+check("T9b 行数 == 格数", len(lines.splitlines()) == 6, len(lines.splitlines()))
+check("T9c beats 不足时用 fallback 兜底", "兜底句" in M.beat_lines(["只有一格"], 3, "兜底句"))
+
+# ── T10 渲染后的 prompt 精确含逐格指定 ──
+full = M.GRID_PROMPT_TPL.format(rows=3, cols=2, cells=6, style="clean bright",
+                                beat_lines=M.beat_lines(b, 6))
+check("T10a 含逐格指定标题", "逐格指定" in full)
+check("T10b 6 格全部出现在 prompt 里", all(("第%d格：" % i) in full for i in range(1, 7)))
+check("T10c 唯一动作串出现在 prompt（不是只给散文）", "放进微波炉" in full)
+check("T10d 合规自检仍全过", M.check_grid_prompt() == [], M.check_grid_prompt()[:2])
+
+# ── T11 s4_grid 优先用 seg.beats ──
+i = SRC.index("def s4_grid"); sb = SRC[i:SRC.index("def s4_images")]
+check("T11a s4_grid 读 seg.beats 优先", 'getattr(seg, "beats"' in sb)
+check("T11b beats 不足才兜底推导", "derive_beats" in sb and "_need" in sb)
+check("T11c beat_lines 进入模板渲染", "beat_lines=beat_lines" in sb)
+check("T11d Segment 有 beats 字段", "beats: list[str]" in SRC)
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)

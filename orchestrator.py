@@ -40,6 +40,7 @@
 """
 from __future__ import annotations
 
+import re
 import argparse
 import concurrent.futures as cf
 import json
@@ -382,6 +383,10 @@ class Segment:
     first: str = ""
     last: str = ""
     mids: list[tuple[str, float]] = field(default_factory=list)
+    # 结构化「分格动作序列」：每格一条「谁 + 可见动作 + 对什么对象 + 该格结束状态」。
+    # 这是宫格模式**准确性/一致性**的根：由脚本直接指定每格画什么，
+    # 而不是把一段散文丢给灵炫让它自己分格（那样宫格与脚本必不一致）。
+    beats: list[str] = field(default_factory=list)
     video: str = ""
     seed: int = 0
     attempts: int = 0
@@ -548,15 +553,49 @@ def _is_grid_image(p, std_thr: float = 5.0, contrast_thr: float = 30.0,
 # ⇒ 模型确实逐个穿过锚点 ⇒ 动作可控（非模型自编）。
 # 🔴 红线：宫格**原图绝不进 H3**（官方：video models may reproduce the panel
 #   layout ⇒ 分屏/四宫格/画框被画进成片）。必须切片 + 裁缝 + 统一比例。
+BEAT_TPL = "第{i}格：{desc}"
+
+
+def derive_beats(prompt: str, n: int) -> list:
+    """从自由叙述推导 N 格动作序列（**兜底**）。
+
+    理想路径是脚本/适配器直接给结构化 beats（`Segment.beats`）；只有缺失时才回退到这里。
+    按中文分句（逗号/句号/分号）切分后均匀取样，保证「每格有独立的一条动作描述」。
+    """
+    txt = (prompt or "").strip()
+    if not txt or n <= 0:
+        return []
+    parts = [x.strip() for x in re.split(r"[，,。；;]+", txt) if x.strip()]
+    if not parts:
+        return [txt] * n
+    if len(parts) >= n:
+        idx = [round(i * (len(parts) - 1) / (n - 1)) for i in range(n)] if n > 1 else [0]
+        return [parts[i] for i in idx]
+    return [parts[i] if i < len(parts) else parts[-1] for i in range(n)]
+
+
+def beat_lines(beats: list, cells: int, fallback: str = "") -> str:
+    """渲染「每一格画什么」的逐行指定。beats 不足的位置用 fallback 兜底。"""
+    out = []
+    for i in range(1, cells + 1):
+        d = beats[i - 1] if i - 1 < len(beats) and beats[i - 1] else (fallback or "接上一格的中间状态")
+        out.append(BEAT_TPL.format(i=i, desc=d))
+    return "\n".join(out)
+
+
 GRID_PROMPT_TPL = (
     "一张 {rows} 行 {cols} 列的连续动作分解图（storyboard grid），共 {cells} 格，"
     "格子之间是清晰的白色细缝，每格是一幅独立完整的画面，格子外没有任何画框、边框或文字。"
-    "整张图描述同一个人在同一场景中完成一段连续动作：{action}。"
+    "整张图描述同一个人在同一场景中完成一段连续动作。"
+    "格子的先后顺序就是动作的先后顺序，"
+    "每一格画什么**必须严格照下面逐格指定**，不得自行改动顺序或省略任何一格：\n"
+    "{beat_lines}\n"
     "硬要求：① 每一格里必须始终是同一个人（同一张脸、同一发型）、同一套服装、同一个场景、"
     "同一件产品、同一光线方向与色调；② 按从左到右、从上到下的顺序，动作依次推进，"
     "相邻格之间是连贯的中间状态；③ 每格必须有清晰可见的身体动作或手部动作，"
     "禁止出现只有镜头变化、主体静止不动的格子；④ 每格构图完整，人物与产品不被格子边缘切除；"
     "⑤ 画面里不要出现任何文字、字幕、水印、logo。整体风格：{style}。"
+    "⑥ 每一格都必须能独立看出它对应的那一步动作，相邻格之间是连贯的中间状态。"
 )
 
 
@@ -685,6 +724,10 @@ GRID_PROMPT_REQUIRED = (
     ("不被格子边缘切除", "构图完整，否则锚帧缺主体"),
     ("不要出现任何文字", "官方：禁止画面文字/水印/logo"),
     ("整体风格", "官方 §4.1：keyframe 任务的风格须由参考图推导"),
+    ("逐格指定", "🔴 准确性根条款：每格画什么必须由脚本指定，不能让灵炫自己分格"),
+    ("必须严格照下面", "同上：顺序不可自行改动"),
+    ("不得自行改动顺序或省略任何一格", "防灵炫合并/省略格子"),
+    ("必须能独立看出它对应的那一步动作", "每格须可辨识对应动作步骤"),
 )
 
 
@@ -692,8 +735,9 @@ def check_grid_prompt(action: str = "把杯子放进微波炉加热后取出",
                       style: str = "clean bright") -> list:
     """渲染宫格 prompt 并返回缺失的必需条款（空列表 = 合规）。"""
     try:
-        txt = GRID_PROMPT_TPL.format(rows=3, cols=2, cells=6,
-                                     action=action, style=style)
+        txt = GRID_PROMPT_TPL.format(
+            rows=3, cols=2, cells=6, style=style,
+            beat_lines=beat_lines(derive_beats(action, 6), 6, action))
     except Exception as e:
         return ["模板渲染失败：%s" % e]
     return ["缺【%s】(%s)" % (sub, why) for sub, why in GRID_PROMPT_REQUIRED
@@ -1298,9 +1342,17 @@ class Orchestrator:
         gdir.mkdir(parents=True, exist_ok=True)
         grid = gdir / ("seg%d_grid.png" % seg.idx)
         if not _img_ok(grid):
+            # 🔴 逐格指定：优先用脚本给的结构化 beats；缺失才从自由叙述推导（兜底）
+            _need = cols * rows
+            _beats = list(getattr(seg, "beats", []) or [])
+            _src = "脚本 beats" if len(_beats) >= _need else "兜底推导"
+            if len(_beats) < _need:
+                _beats = derive_beats((seg.prompt or "").replace("\n", " "), _need)
+            log("S4", "  段%d 分格动作序列（%s）：%s"
+                % (seg.idx, _src, " ｜ ".join("%d.%s" % (i, b[:34]) for i, b in enumerate(_beats, 1))))
             prompt = GRID_PROMPT_TPL.format(
-                rows=rows, cols=cols, cells=cols * rows,
-                action=(seg.prompt or "").replace("\n", " ").strip()[:400],
+                rows=rows, cols=cols, cells=_need,
+                beat_lines=beat_lines(_beats, _need, (seg.prompt or "")[:200]),
                 style=CFG.get("grid_style", ""))
             log("S4", "  段%d 生成宫格图 %d×%d…" % (seg.idx, cols, rows))
             if not self.tt_img(grid, CFG["img_size"], prompt, []):
