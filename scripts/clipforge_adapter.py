@@ -232,9 +232,16 @@ def gate_p3(shots: list[dict], requested_duration: float | None = None) -> dict:
                     "镜%d 台词 %d 字 / 预算 %.0f 字（覆盖 %.0f%%）→ 可能有 %.1fs 空档"
                     % (idx, len(line), budget, cov * 100, dur * (1 - cov)))
             if cov > 1.25:
-                warnings.append(
-                    "镜%d 台词 %d 字 超出预算 %.0f 字（%.0f%%）→ 可能念不完/被截断"
-                    % (idx, len(line), budget, cov * 100))
+                # 🔴 2026-09-20 用户拍板：从 warning 升级为 **error**（强制重写而非放行）。
+                # 依据：实测 4 镜里 3 镜超标 135–147% ⇒ 音频必然被截断，是「念不完 /
+                # 有大段空档」的直接根因。记 error 会让「多候选择优」优先挑字数达标的
+                # 候选（与 beats 同一套机制）；再配合 params.gate_p3_strict=True
+                # 可硬阻断（但那会在全部候选都超标时整链失败，默认不开）。
+                errors.append(
+                    "镜%d 台词 %d 字 超出预算 %.0f 字（%.0f%%）→ 必被截断，须压缩到 "
+                    "%d 字以内（%.1f 字/秒 × %.1fs）"
+                    % (idx, len(line), budget, cov * 100,
+                       int(budget), CHARS_PER_SEC, dur))
 
         # ── 闸门 D：画面内文字（字幕/价签/评价页会烧进成片）──
         for bad in ("字幕", "价格标签", "价签", "评价页", "评分", "评论区", "文字浮层",
