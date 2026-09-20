@@ -16,7 +16,7 @@
 
 跑法:  python3 tests/test_p7_grid.py
 """
-import sys, types, tempfile
+import subprocess, sys, types, tempfile
 from pathlib import Path
 import numpy as np
 from PIL import Image
@@ -156,6 +156,27 @@ check("T12e 门禁默认开启 + 阈值 70%",
       (M.CFG.get("grid_consistency_gate"), M.CFG.get("grid_min_align_pct")))
 check("T12f 复用 judge_l2 的 _vlm_call（不另起一路模型）",
       "from judge_l2 import _vlm_call" in SRC)
+
+# ── T13 闸门② 的 K 次退回重写回路（A）──
+check("T13a Gate2Reject 是 CircuitBreak 的子类（可单独捕获）",
+      "class Gate2Reject(CircuitBreak)" in SRC)
+check("T13b 定义顺序正确（CircuitBreak 在前，否则导入即 NameError）",
+      SRC.index("class CircuitBreak") < SRC.index("class Gate2Reject"),
+      "顺序反了 ⇒ 导入时 NameError（py_compile 查不出来）")
+check("T13c s3_gate2 抛 Gate2Reject（原为 CircuitBreak ⇒ 承诺重写却直接失败）",
+      "raise Gate2Reject(" in SRC)
+check("T13d run() 有 K 次重写回路", "gate2_rewrite_k" in SRC and "for _k in range(1, _k_max + 1)" in SRC)
+check("T13e 只有 Gate2Reject 触发重写（其它熔断立即失败）",
+      "except Gate2Reject as _e:" in SRC)
+check("T13f 默认 K=3 / 不降级（响亮失败）",
+      M.CFG.get("gate2_rewrite_k") == 3 and M.CFG.get("gate2_degrade_after_k") is False,
+      (M.CFG.get("gate2_rewrite_k"), M.CFG.get("gate2_degrade_after_k")))
+check("T13g 重写会重新调 ClipForge（换一批候选，不是重放同一份）",
+      "_one_script_round" in SRC and "self.s1_script()" in SRC)
+check("T13h 导入可执行（真导入而非仅编译）",
+      subprocess.run([sys.executable, "-c",
+        "import sys;sys.path.insert(0,'%s');import orchestrator as o;assert issubclass(o.Gate2Reject,o.CircuitBreak)"
+        % ROOT], capture_output=True).returncode == 0)
 
 print()
 if _fails:

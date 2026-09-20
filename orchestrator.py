@@ -173,6 +173,9 @@ CFG = {
         "then the shot holds", "画面定格", "静止不动",
     ],
     # 动作链步数上限：超过即判「一拍多步」→ 必须拆镜或只留一步主动作
+    # 闸门② 否决后的退回重写次数（0/1=不重写）
+    "gate2_rewrite_k": 3,
+    "gate2_degrade_after_k": False,   # True=K 用尽后降级放行（默认 False：响亮失败）
     "max_action_steps": 2,
     # 官方 §4.1：关键帧任务从参考图推导风格。我们的锚定图是真实感实拍风 → Live-action
     "h3_style": "Live-action, cinematic",
@@ -996,6 +999,11 @@ T0 = time.time()
 
 
 class CircuitBreak(Exception):
+    """闸门② 否决 —— **可重试**（退回文字层换一批候选重写）。
+    与其它 CircuitBreak 区分：只有它才触发 K 次重写回路，其它熔断立即失败。"""
+
+
+class Gate2Reject(CircuitBreak):
     """熔断：到顶必须报明确失败，禁止静默续跑。"""
 
 
@@ -1342,7 +1350,7 @@ class Orchestrator:
             self.state["gate2_rejected"] = rejected
             self.save_state("S3-rejected")
             if not self.dry:
-                raise CircuitBreak("闸门② 否决 %d 行，须退回重写" % len(rejected))
+                raise Gate2Reject("闸门② 否决 %d 行" % len(rejected))
         else:
             log("S3", "✅ ★闸门② 全镜通过（含 动作数≤%d / 无静止写法 / 主体动作存在）"
                 % CFG.get("max_action_steps", 2))
@@ -2032,15 +2040,40 @@ class Orchestrator:
             self.s0_ingest()
 
             # ⭐ 优化：母版出图与文字层并行（母版只依赖素材，不依赖分镜）
-            with cf.ThreadPoolExecutor(max_workers=1) as ex:
-                master_fu = ex.submit(self.tt_img, self.out / "img" / "master.png",
-                                      CFG["img_size"], "world master sheet", self.job.product_images[:1])
-                side_a = self.s1_script()
-                if master_fu.result() is None:
-                    log("S4", "⚠️ 母版生成失败 → 改用产品图作母版")
+            def _one_script_round():
+                with cf.ThreadPoolExecutor(max_workers=1) as ex:
+                    master_fu = ex.submit(self.tt_img, self.out / "img" / "master.png",
+                                          CFG["img_size"], "world master sheet",
+                                          self.job.product_images[:1])
+                    side_a = self.s1_script()
+                    if master_fu.result() is None:
+                        log("S4", "⚠️ 母版生成失败 → 改用产品图作母版")
+                return self.s3_gate2(self.s2_adapter(side_a))
 
-            rows = self.s2_adapter(side_a)
-            rows = self.s3_gate2(rows)
+            # ── 闸门② 否决 ⇒ **真的**退回文字层重写（K 次）──
+            # 修复：原实现只打印「退回 S1/S2 重写（最多 K=3）」然后立即 CircuitBreak
+            # ⇒ 承诺了重试却没实现（本 session 第 4 处「声明了没实现」）。
+            # 语义：只有 Gate2Reject 触发重写；其它 CircuitBreak（S4/S5/S8 等）立即失败。
+            _k_max = max(1, int(CFG.get("gate2_rewrite_k", 3)))
+            _last = None
+            for _k in range(1, _k_max + 1):
+                try:
+                    rows = _one_script_round()
+                    if _k > 1:
+                        log("S3", "✅ 闸门② 第 %d 次重写后通过" % _k)
+                    break
+                except Gate2Reject as _e:
+                    _last = _e
+                    if _k >= _k_max:
+                        if CFG.get("gate2_degrade_after_k"):
+                            log("S3", "⚠️ 闸门② 连 %d 次否决 ⇒ 降级「B 类不可验证化」放行"
+                                "（gate2_degrade_after_k=True，风险自负）" % _k)
+                            rows = self.s2_adapter(side_a)
+                            break
+                        raise CircuitBreak("闸门② 连 %d 次否决（K=%d 用尽）：%s"
+                                           % (_k, _k_max, _e))
+                    log("S3", "↺ 闸门② 第 %d/%d 次否决 → **退回文字层重写**（重新调 ClipForge 换一批候选）"
+                        % (_k, _k_max))
             segments = self.s2c_group(rows)
             imgset = self.s4_images(segments)
             self.s4b_tone()
