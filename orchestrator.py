@@ -650,10 +650,54 @@ def _slice_grid(src, outdir, tag: str, cols: int, rows: int,
                 dst = outdir / ("%s_cell%d.png" % (tag, len(cells) + 1))
                 ci.save(dst)
                 cells.append(dst)
-        return cells if len(cells) == cols * rows else []
+        if len(cells) != cols * rows:
+            return []
+        # 去退化：**所有**相邻格几乎无差异 ⇒ 宫格没有动作信息，锚点等同虚无（成片必静）。
+        # 阈值 5.0 的来历（实测标定，非拍脑袋）：
+        #   退化宫格（各格同内容）相邻差异 0.94–3.06（非 0，切分有亚像素偏移）
+        #   正常宫格（动作递变）相邻差异 29.6–32.1
+        #   ⇒ 5.0 落在两者之间的空档，两边都有 1.6× 以上余量。
+        # 只拦「全部相邻对都过低」；局部偏低（某两格接近）留给 s4_grid 告警。
+        if len(cells) > 1:
+            _d = [_frame_mae(cells[i], cells[i + 1]) for i in range(len(cells) - 1)]
+            if max(_d) < 5.0:
+                log("S4", "⚠️ 宫格内所有相邻格几乎无差异（最大 %.2f < 5.0）"
+                    "⇒ 无动作信息，锚点等同虚无 ⇒ 拒绝切片" % max(_d))
+                return []
+        return cells
     except Exception as e:
         log("S4", "⚠️ 宫格切片失败：%s" % e)
         return []
+
+
+# ── 宫格 prompt 合规自检（防未来改动静默破坏官方要求）──
+# 每条 = (必须出现的子串, 官方依据)。改模板后若丢条款，check_grid_prompt 会报出来。
+GRID_PROMPT_REQUIRED = (
+    ("白色细缝", "格间白缝 ⇒ 切片器可检测格线；无白缝则无法可靠切分"),
+    ("独立完整的画面", "官方：每格须是 complete standalone product photo"),
+    ("没有任何画框、边框或文字", "官方：禁止 framed panels / 画面内文字"),
+    ("同一个人", "官方 §3.2：跨格身份一致，否则 H3 在锚点间变形"),
+    ("同一件产品", "产品跨格一致，否则产品形态漂移"),
+    ("光线方向", "官方 §3.2 + 项目「同场景同光向」要求"),
+    ("动作依次推进", "官方 §3.2：可观察的中间变化、逐步收窄"),
+    ("身体动作或手部动作", "项目实证：只有镜头运动 ⇒ 拍成静态（洗碗机镜教训）"),
+    ("主体静止不动", "同上：显式禁止静止格"),
+    ("不被格子边缘切除", "构图完整，否则锚帧缺主体"),
+    ("不要出现任何文字", "官方：禁止画面文字/水印/logo"),
+    ("整体风格", "官方 §4.1：keyframe 任务的风格须由参考图推导"),
+)
+
+
+def check_grid_prompt(action: str = "把杯子放进微波炉加热后取出",
+                      style: str = "clean bright") -> list:
+    """渲染宫格 prompt 并返回缺失的必需条款（空列表 = 合规）。"""
+    try:
+        txt = GRID_PROMPT_TPL.format(rows=3, cols=2, cells=6,
+                                     action=action, style=style)
+    except Exception as e:
+        return ["模板渲染失败：%s" % e]
+    return ["缺【%s】(%s)" % (sub, why) for sub, why in GRID_PROMPT_REQUIRED
+            if sub not in txt]
 
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
