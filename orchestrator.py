@@ -792,30 +792,55 @@ def judge_grid_vs_beats(cells: list, beats: list, workers: int = 4) -> dict:
             b64 = base64.b64encode(Path(cells[i]).read_bytes()).decode()
         except Exception as e:
             return (i, None, "读图失败:%s" % e)
-        claim = ("这张图是一组分镜图里的第 %d 格。只回答 yes 或 no，不要解释。\n"
-                 "问题：这一格画面中的动作，与下面这句脚本指定的动作是否一致？\n"
-                 "脚本指定：%s\n"
-                 "判据：只要画面明显看不出这个动作、或做的是另一个动作、或这一格是"
-                 "空白/纯背景而看不出人，就答 no。" % (i + 1, beat or "（脚本未指定）"))
+        # 🔴 两问合一：Q1 动作一致性（计入一致率）
+        #           Q2 **物理/空间逻辑错误**（单格否决）
+        # 由来：实测「口罩外侧画了唇印」被 83% 的平均分掩盖放行
+        # ⇒ 不能只看均值：逻辑性错误是**一票否决**级别。
+        claim = ("这是一组分镜图里的第 %d 格。请只输出 JSON，不要解释。\n"
+                 "评估两件事：\n"
+                 "  Q1 \"match\": 这一格画面中的动作，与下面这句脚本指定的动作是否一致？"
+                 "（yes/no；画面看不出这个动作、或做的是另一个动作、"
+                 "或这格是空白/纯背景看不出人 → no）\n"
+                 "  Q2 \"logic_bad\": 这一格存在**物理或空间逻辑错误**吗？（yes/no）\n"
+                 "     例：口罩上的唇印画在外侧（应在贴着嘴唇的内侧）、液体往上流、"
+                 "容器未打开但物体已在里面、手指数量不对或融合、"
+                 "产品形态变形或变成别的东西、主体缺失\n"
+                 "     注意：只是「动作不完全对应」不算 logic_bad；必须是**不合理**。\n"
+                 "脚本指定：%s" % (i + 1, beat or "（脚本未指定）"))
         try:
             r = _vlm_call([b64], claim, retries=2)
         except Exception as e:
-            return (i, None, "异常:%s" % e)
-        low = str(r).lower()
-        v = "yes" if "yes" in low else ("no" if "no" in low else None)
-        return (i, v, str(r)[:70])
+            return (i, None, str(e)[:60], None)
+        # r 是 dict（judge_l2 强制 JSON 出参）：{"match": "...", "logic_bad": "...", ...}
+        _m = _b = None
+        if isinstance(r, dict):
+            _m = str(r.get("match", "")).strip().lower() or None
+            _b = str(r.get("logic_bad", "")).strip().lower() or None
+        if _m not in ("yes", "no") or _b not in ("yes", "no"):
+            low = str(r).lower()
+            if _m not in ("yes", "no"):
+                _m = "yes" if '"match": "yes' in low or "'match': 'yes'" in low else (
+                    "no" if "no" in low else None)
+            if _b not in ("yes", "no"):
+                _b = "yes" if "logic_bad" in low and '"yes' in low.split("logic_bad")[-1][:30] else (
+                    "no" if "logic_bad" in low else None)
+        return (i, _m, str(r)[:70], _b)
 
     with cf.ThreadPoolExecutor(max_workers=max(1, int(workers))) as ex:
         rows = list(ex.map(_one, range(len(cells))))
     mis = [(i + 1, beats[i] if i < len(beats) else "", raw)
-           for i, v, raw in rows if v == "no"]
-    checked = sum(1 for _, v, _ in rows if v in ("yes", "no"))
+           for i, v, raw, _b in rows if v == "no"]
+    # 🔴 单格否决：物理/空间逻辑错误是**一票否决**级别，不看平均一致率
+    #    （由来：实测「口罩外侧画了唇印」被 83% 的平均分掩盖放行）
+    bad = [(i + 1, beats[i] if i < len(beats) else "", raw)
+           for i, _v, raw, _b in rows if _b == "yes"]
+    checked = sum(1 for _, v, _, _b in rows if v in ("yes", "no"))
     if checked == 0:
         log("S4", "⚠️ 一致性门禁：%d 格一格都没判成（VLM 全失败）⇒ **不算通过**，"
             "按未校验处理（不静默放行）" % len(cells))
-        return {"checked": 0, "aligned": 0, "misaligned": [], "skipped": True}
+        return {"checked": 0, "aligned": 0, "misaligned": [], "logic_bad": [], "skipped": True}
     return {"checked": checked, "aligned": checked - len(mis),
-            "misaligned": mis, "skipped": False}
+            "misaligned": mis, "logic_bad": bad, "skipped": False}
 
 
 def segment_has_action(beats: list, text: str = "") -> tuple:
@@ -1612,6 +1637,15 @@ class Orchestrator:
                         # ⚠️ grid_min_align_pct 本身就是「百分比数值」(70)，不要再乘 100
                 # （曾写成 100.0 * ... ⇒ 阈值变 7000% ⇒ 恒 > 实际一致率 ⇒ 每段宫格都被拒，
                 #   整条链路静默退回常规首尾帧 —— 表现为「跑了宫格但没有任何宫格日志」）
+                # 🔴 单格否决（一票否决）：任何一格被判「物理/空间逻辑错误」⇒ 整格宫格作废
+                if _r.get("logic_bad") and CFG.get("grid_cell_veto", True):
+                    for _i, _b2, _raw2 in _r["logic_bad"]:
+                        log("S4", "    🛑 第%d格 **物理/空间逻辑错误**（脚本：%s）VLM：%s"
+                            % (_i, (_b2 or "")[:40], _raw2[:40]))
+                    log("S4", "❌ 段%d 命中单格否决（逻辑错误 %d 格）⇒ 拒绝该宫格"
+                        " （不看平均一致率 —— 逻辑错误是一票否决级别）"
+                        % (seg.idx, len(_r["logic_bad"])))
+                    return []
                 _minp = float(CFG.get("grid_min_align_pct", 70.0))
                 if _pct < _minp and not self.dry:
                     log("S4", "❌ 段%d 一致性仅 %.0f%% < %.0f%% —— 宫格与脚本不符"

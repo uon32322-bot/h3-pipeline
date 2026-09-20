@@ -770,6 +770,29 @@ export const RETENTION_CONVERSION_RULES = `【留人与转化硬规则】
 // ==================== Output Format Constraints ====================
 
 /** JSON output format constraint prompt */
+export const PRODUCT_STRATEGY_SPLIT_2026 = `【产品策略分流（2026-09-20 用户拍板）】
+
+先判断品类，再决定要不要讲痛点。**不要所有产品都套"痛点"模板**。
+
+一、认知度高的日常品类（口红／唇釉、洗发水、纸巾、牙膏…）
+   ⇒ **不表现痛点**。只需要表现两件事：
+     ① **使用过程**：打开 → 取用 → 涂抹/使用 → 完成（每步都有人物手部动作）
+     ② **使用后的前后变化**：使用前 vs 使用后的可见差异（唇色对比／光泽变化／质地）
+   ⇒ 原因：这类产品"痛点"是大众共识，讲了不增加信息量；观众想看的是**效果**。
+   ⇒ 画面要求：主体始终是产品与使用动作，简单、清晰、可拍。
+
+二、功能性强的产品（防水耳机、去屑洗发水、祛痘、除螨…）
+   ⇒ 痛点表达**适用**（购买动机正是"原来这是个问题"）。
+   ⇒ 痛点必须具体化到可拍（有场景/有身体细节/有后果），不写"不好看""不持久"。
+
+三、通用硬约束（两类都适用）
+   · 画面不得依赖**物理/空间因果推理**（示例：口罩上的唇印该在内侧还是外侧、
+     液体不能往上流、容器未打开时物体不能已在里面）。模型分不清内外与因果，
+     这类画面**一律不写**。
+   · 不得依赖**复杂手-物交互**（同时操作两个物体、双手抛接）。
+   · 动作必须能被一双手在 2 秒内完成。
+`;
+
 export const SCRIPT_STRUCTURE_RULES_2026 = `【脚本结构硬规则（2026-09 调研依据 + 项目实测）】
 
 一、每镜必须换场景（相邻两镜同一场所 = 废稿）
@@ -1173,6 +1196,7 @@ export function buildUserPrompt(input: ScriptGenerationInput): string {
   parts.push(`\n${OUTPUT_FORMAT_PROMPT}`);
   parts.push(`\n${COPYWRITING_RULES_2026}`);
   parts.push(`\n${SCRIPT_STRUCTURE_RULES_2026}`);
+  parts.push(`\n${PRODUCT_STRATEGY_SPLIT_2026}`);
 
   // Language follows the product info language: English products (overseas TikTok Shop/Amazon)
   // should produce English scripts/voiceovers; otherwise the OUTPUT_FORMAT's "Chinese voiceover"
