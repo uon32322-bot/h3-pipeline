@@ -1567,12 +1567,14 @@ class Orchestrator:
             # 🔴 逐格指定：优先用脚本给的结构化 beats；缺失才从自由叙述推导（兜底）
             _need = cols * rows
             _beats = list(getattr(seg, "beats", []) or [])
-            _src = "脚本 beats" if len(_beats) >= _need else "兜底推导"
-            if len(_beats) < _need:
-                _beats = derive_beats((seg.prompt or "").replace("\n", " "), _need)
+            # 🔴 脚本 beats 必须**保留**，只在不足时用它物补齐 —— 曾写成「不足就整个
+            #    换成散文推导」⇒ 真动作被丢掉、宫格又退回静物碎片（实测 4 段全打印「兜底推导」）
+            _n_real = len(_beats)
+            _src = "脚本 beats" if _n_real >= _need else "脚本 beats %d 条 + 推导补齐" % _n_real
+            if _n_real < _need:
+                _pad = derive_beats((seg.prompt or "").replace("\n", " "), _need - _n_real)
+                _beats = (_beats + _pad)[:_need]
             _beats = _beats[:_need]          # 超出格数要截断，否则模板多出行
-            if len(_beats) < _need:          # 兜底仍不足则补齐
-                _beats = (_beats + (_beats[-1:] or [""]) * _need)[:_need]
             log("S4", "  段%d 分格动作序列（%s）：%s"
                 % (seg.idx, _src, " ｜ ".join("%d.%s" % (i, b[:34]) for i, b in enumerate(_beats, 1))))
             prompt = GRID_PROMPT_TPL.format(
