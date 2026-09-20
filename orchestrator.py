@@ -1018,6 +1018,7 @@ def build_h3_prompt(shots: list, seconds: float,
         vis, _mh = _motion_boost(vis, CFG.get("subject_action_words", []))
         if _mh:
             log("S2", "镜%d 运动增强: %s" % (i, ",".join(_mh)))
+        vis = _deconflict_camera(vis, bool(_mh))
         # 注意：S2 节拍表把台词放在 text.voiceover_zh（不是顶层 line）；
         # 读错字段会让组装出的 prompt 丢掉全部台词 ⇒ 成片静音。
         line = (sh.get("line") or (sh.get("text") or {}).get("voiceover_zh") or "").strip()
@@ -1037,14 +1038,62 @@ def build_h3_prompt(shots: list, seconds: float,
             mm, ss = int(at // 60), at % 60
             piece = "[Shot %d] At %02d:%06.3f, the camera cuts to %s" % (i, mm, ss, vis)
         if line:
-            piece += (" The woman (S1) %s: <d>[Chinese] %s</d>"
-                      % (CFG.get("h3_voice_style", "says naturally"), line))
+            _spk = _speaker_clause(vis, line)
+            if _spk:
+                piece += " " + _spk
         parts.append(piece)
     return ("%s\n\nintegrated_multimodal_description: %s\n\noverall_soundscape: %s\n\n"
             "non_diegetic_music: %s"
             % (align, " ".join(parts),
                soundscape or CFG.get("h3_soundscape_default", ""),
                music or CFG.get("h3_music_default", "N/A")))
+
+# ══════════════════════════════════════════════════════════════════
+# 说话人声明（官方 §4.4）—— 身份短语写 <d> 外，<d> 内只有语言标签+台词
+#   有脸的镜 -> on-camera 口播（对口型）；无脸的镜 -> 显式 off-screen 画外音
+#   根因: 硬写 "The woman (S1) says naturally" 但画面常无人 -> H3 只能做画外音
+# ══════════════════════════════════════════════════════════════════
+_PERSON_WORDS = ("woman", "man", "model", "person", "girl", "guy",
+                 "her face", "his face", "she ", " he ", "smiling", "smile")
+# 纯手部/纯静物镜不算"有可对口型的主体"
+_HAND_ONLY_WORDS = ("close-up of a hand", "hands only", "hand holding",
+                    "fingers", "wrist", "no one is visible", "unmanned")
+
+_SPEAKER_IDENT = ("A Chinese woman in her mid-twenties, natural and camera-friendly, "
+                  "speaking straight to the lens in a bright, friendly, confident tone, "
+                  "medium pitch, warm timbre, moderate pace, standard Mandarin accent")
+
+
+def _has_on_camera_face(vis: str) -> bool:
+    """画面的视觉描述里是否存在【可对口型的人物正脸】。"""
+    v = (vis or "").lower()
+    if any(k in v for k in _HAND_ONLY_WORDS):
+        return False
+    return any(k in v for k in _PERSON_WORDS)
+
+
+def _speaker_clause(vis: str, line: str) -> str:
+    """按官方 §4.4 生成说话人声明。有脸=对口型口播；无脸=显式画外音。"""
+    if not line:
+        return ""
+    if _has_on_camera_face(vis):
+        return ("%s says naturally on camera, her lips and jaw moving in perfect sync "
+                "with the words: <d>[Chinese] %s</d>" % (_SPEAKER_IDENT, line))
+    return ("A warm, natural-sounding female Mandarin voice says in an off-screen "
+            "voiceover while her lips remain completely closed: "
+            "<d>[Chinese] %s</d>" % line)
+
+
+def _deconflict_camera(vis: str, motion_boosted: bool) -> str:
+    """D: static camera 与运动增强句 'never holding still' 自相矛盾 -> 二者只留其一。
+    已加运动增强时，把 static camera 改成缓慢持续运镜。"""
+    if not motion_boosted:
+        return vis
+    for a, b in (("A static camera frames", "A slowly drifting camera continuously pushes in on"),
+                 ("a static camera frames", "a slowly drifting camera continuously pushes in on"),
+                 ("static camera", "slowly drifting camera")):
+        vis = vis.replace(a, b)
+    return vis
 
 def _tone_sfx(enable: bool = True) -> str:
     """P5 统一视觉基准后缀（母版/锚定照/段首尾帧共用）。"""
