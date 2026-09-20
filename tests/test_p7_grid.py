@@ -210,6 +210,32 @@ check("T16b beats 缺失记为 error（靠择优形成压力）",
 check("T16c beats 充足时统计条数", "beats_per_shot" in ADP)
 check("T16d 单镜 beats<2 条给 warning", "少于 2 条" in ADP)
 
+# ── T17 产品识别（VL）—— 修「ClipForge 收到零信息就编造产品」──
+check("T17a vl_product_info 方法存在", "def vl_product_info" in SRC)
+# ⚠️ 锚点必须只出现在 s0_ingest 里：'★闸门① 保真分层' 在文件头 docstring 也有一份
+# （实测首现在 index 119 ⇒ 用裸串会拿到 docstring 那份，测试假失败）
+check("T17b 识别在保真分层**之前**（画面品牌文字是像素级信号）",
+      SRC.index("info = self.vl_product_info()")
+      < SRC.index('log("S0", "★闸门① 保真分层'))
+check("T17c 用户已给描述时不覆盖（用户优先）",
+      "product_text or \"\").strip()" in SRC and "跳过 VL 识别（用户优先）" in SRC)
+check("T17d 识别失败不编造（返回 None + 响亮告警）",
+      "不编造" in SRC and "可能自由发挥编造产品" in SRC)
+check("T17e 结果落盘 report/product_vl.json", "product_vl.json" in SRC)
+check("T17f 识别的品类/形态/颜色/特征/包装文字都进 product_text",
+      all(k in SRC for k in ('info.get("category")', 'info.get("form")',
+                             'info.get("visible_features")', 'package_text')))
+check("T17g prompt 明令禁止编造（不凭空说泵头/美妆蛋）",
+      "Never invent" in SRC and "Do NOT describe anything not present" in SRC)
+check("T17h 识别结果写入 product_name（供 ClipForge --name）",
+      'setdefault("product_name"' in SRC or 'params["product_name"]' in SRC)
+check("T17i 可用性自检 vl_product_ready 存在", "def vl_product_ready" in SRC)
+_J = (ROOT / "judge_l2.py").read_text(errors="replace")
+check("T17j _vlm_call 支持自定义 system（判官人设不能复用到描述任务）",
+      "system=None" in _J and "system or VLM_SYS" in _J)
+check("T17k _vlm_call 支持只要原文 want_json=False", "want_json" in _J)
+check("T17l 默认开启 vl_product_analysis", M.CFG.get("vl_product_analysis") is True)
+
 print()
 if _fails:
     print("P7 FAILED %d: %s" % (len(_fails), _fails)); sys.exit(1)

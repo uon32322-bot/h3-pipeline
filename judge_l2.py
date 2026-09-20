@@ -448,7 +448,18 @@ def _rgb_from_video(path):
 
 
 # ------------------------------------------------------------------ L2 VLM 判官
-def _vlm_call(frames_b64, claim, retries=5, think=False):
+def _vlm_call(frames_b64, claim, retries=5, think=False,
+              system=None, want_json=True, max_tokens=None):
+    """多模态调用。默认 = 判官形态（二值判定，强制 JSON 出参）。
+
+    ⭐ 2026-09-20 扩展（产品识别用）：judge 形态的 system 会把人设限死成
+    「yes/no/na 判定」，**不能**拿来做「描述产品」这类任务 —— 会答非所问。
+    故新增：
+      · system    —— 覆盖人设（默认 VLM_SYS，判官用）
+      · want_json —— False 时直接返回原文 {"text": ...}，不做 JSON 抽取
+      · max_tokens—— 覆盖默认（描述类需要更多 token；默认 400 会被推理吃掉）
+    """
+
     """⚠️ 必须把失败**显式打出来**，不能静默降级成 na。
     实测踩坑：3 个判官 × 6 并发 = 18 路同时打 API ⇒ 全部被限流，
     17 个判项**全部静默返回 na**，报告却看起来"跑成功了"。
@@ -484,9 +495,9 @@ def _vlm_call(frames_b64, claim, retries=5, think=False):
         content.append({"type": "image_url",
                         "image_url": {"url": "data:image/jpeg;base64," + b}})
     payload = {"model": VLM_MODEL, "temperature": 0,
-               "messages": [{"role": "system", "content": VLM_SYS},
+               "messages": [{"role": "system", "content": system or VLM_SYS},
                             {"role": "user", "content": content}],
-               "max_tokens": 900 if think else 400}
+               "max_tokens": int(max_tokens) if max_tokens else (900 if think else 400)}
     if not think:
         payload["thinking"] = {"type": "disabled"}   # ⭐ 关思考链：2.5s vs 93s
     last = None
@@ -503,6 +514,8 @@ def _vlm_call(frames_b64, claim, retries=5, think=False):
             rtok = ((d.get("usage") or {}).get("completion_tokens_details")
                     or {}).get("reasoning_tokens") or 0
             txt = d["choices"][0]["message"]["content"] or ""
+            if not want_json:                      # 只要原文（描述类任务）
+                return {"text": txt, "_reasoning_tokens": rtok}
             m = re.search(r"\{.*\}", txt, re.S)
             if not m:
                 raise ValueError("no json: " + txt[:200])

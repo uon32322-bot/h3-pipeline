@@ -123,6 +123,8 @@ CFG = {
     # 动作段 vs 静物段判别：静物段（无动作可拆）不走宫格，省一次灵炫出图
     "grid_require_action": True,
     "grid_min_action_verbs": 2,
+    # 产品识别（VL）：让 ClipForge 拿到「真实产品」的文字描述，而非零信息
+    "vl_product_analysis": True,
     "grid_style": "clean bright commercial kitchen product ad, soft natural daylight",        # 尾帧重出轮数上限（到顶只告警放行，不熔断）
     "grid_gate": True,            # 宫格/拼版图禁止进 H3（官方铁律）
     "s1_timeout_s": 900,         # S1 ClipForge 调用超时（实测 6 镜约 25s，留足余量）
@@ -840,6 +842,46 @@ def segment_has_action(beats: list, text: str = "") -> tuple:
         return (True, "动作词 %d 个 %s" % (len(hits), hits[:6]))
     return (False, "仅 %d 个动作词 %s；景物/镜头词 %s ⇒ 静物段" % (len(hits), hits[:4], cam[:6]))
 
+
+# ═══════════ 产品识别（VL，2026-09-20）═══════════
+# 🔴 为什么必需：ClipForge 的 /api/llm/script **只吃文字**（productName +
+#    productDescription），不收图片。product_text 为空时 = ClipForge 零信息，
+#    LLM 只能凭 style 提示自由发挥 —— 实测把「唇釉」写成「粉底液」，
+#    还编出「泵头是玫瑰金色 / 瓶身是磨砂玻璃 / 美妆蛋和粉底刷」。
+#    而我们的图像层一直在画正确的产品 ⇒ 错的是「没做识别就交给文字层」这一步。
+VLM_PRODUCT_SYS = (
+    "You are a meticulous product-identification analyst for e-commerce short videos. "
+    "You examine ONE product photo and report ONLY what is plainly visible. "
+    "Never invent hardware, textures or accessories that you cannot see. "
+    "If something is genuinely unclear, record it in \"uncertain\" instead of guessing. "
+    "Output STRICT JSON only, with no prose and no markdown fences."
+)
+VLM_PRODUCT_PROMPT = (
+    "Examine this product photo and report ONLY what is visible.\n"
+    "Return strict JSON with exactly these keys:\n"
+    "  name            : product name in Chinese (copy visible branding; if none, name it by form)\n"
+    "  category        : product category in Chinese (e.g. 唇釉 / 口红 / 粉底液 / 无线耳机 / 咖啡液)\n"
+    "  form            : physical form in Chinese (e.g. 细长方管+旋盖+唇釉刷头 / 瓶装液体 / 罐装)\n"
+    "  color           : dominant colour in Chinese\n"
+    "  package_text    : ALL text legible on the package, verbatim; empty string if none\n"
+    "  visible_features: array of up to 4 VISIBLE material/structure traits, in Chinese\n"
+    "  uncertain       : anything you genuinely cannot tell (e.g. 看不出是口红还是唇釉)\n"
+    "Do NOT describe anything not present in the image."
+)
+
+
+def vl_product_ready() -> bool:
+    """产品识别是否可用（judge_l2 可导入 + 有 Key）。"""
+    try:
+        _p = Path(__file__).resolve().parent
+        for _c in (_p, _p / "scripts"):
+            if _c.exists() and str(_c) not in sys.path:
+                sys.path.insert(0, str(_c))
+        from judge_l2 import _vlm_call  # noqa: F401
+        return True
+    except Exception:
+        return False
+
 def _strip_inline_voiceover(desc: str) -> str:
     """剥离正文里内嵌的台词句 —— 官方 §4.4 要求台词只出现在 <d> 内。
 
@@ -1156,10 +1198,73 @@ class Orchestrator:
         return out
 
     # ---------- S0 ----------
+    def vl_product_info(self) -> dict | None:
+        """产品识别（VL）：读第一张产品图 → 品名/品类/形态/颜色/可见特征。
+
+        失败/判不成一律返回 None（调用方跳过，**绝不静默编造**）。
+        """
+        import base64
+        try:
+            _p = Path(__file__).resolve().parent
+            for _c in (_p, _p / "scripts"):
+                if _c.exists() and str(_c) not in sys.path:
+                    sys.path.insert(0, str(_c))
+            from judge_l2 import _vlm_call
+        except Exception as e:
+            log("S0", "⚠️ 产品识别不可用（judge_l2 导入失败：%s）⇒ 跳过" % e)
+            return None
+        img = Path(self.job.product_images[0])
+        if not img.exists():
+            log("S0", "⚠️ 产品图不存在：%s" % img)
+            return None
+        try:
+            b64 = base64.b64encode(img.read_bytes()).decode()
+        except Exception as e:
+            log("S0", "⚠️ 读产品图失败：%s" % e)
+            return None
+        try:
+            r = _vlm_call([b64], VLM_PRODUCT_PROMPT, retries=3,
+                          system=VLM_PRODUCT_SYS, want_json=True, max_tokens=1500)
+        except Exception as e:
+            log("S0", "⚠️ 产品识别调用失败：%s" % e)
+            return None
+        if not isinstance(r, dict) or r.get("verdict") == "na" or r.get("_error"):
+            log("S0", "⚠️ 产品识别未返回有效结果 ⇒ 跳过（不编造）")
+            return None
+        return r
+
     def s0_ingest(self) -> None:
         log("S0", "入库 %d 张产品图 / %d 张模特图" % (len(self.job.product_images), len(self.job.model_images)))
         if not self.job.product_images:
             raise CircuitBreak("S0 缺产品图，早退回（不带病进入）")
+        # ── 产品识别（VL）：必须在保真分层**之前** —— 画面品牌文字是像素级信号，
+        #    而 product_text 为空时分层只能看文件名（实测唇釉被判成「形态级」）。
+        if CFG.get("vl_product_analysis", True) and not (self.job.product_text or "").strip():
+            info = self.vl_product_info()
+            if info:
+                try:
+                    (self.out / "report" / "product_vl.json").write_text(
+                        json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+                except Exception:
+                    pass
+                _parts = [str(info.get("category") or ""), str(info.get("form") or ""),
+                          (str(info.get("color") or "") + "色") if info.get("color") else "",
+                          "、".join([str(x) for x in (info.get("visible_features") or [])[:4]]),
+                          ("包装文字：" + str(info["package_text"])) if str(info.get("package_text") or "").strip() else ""]
+                _desc = "；".join([x for x in _parts if x])
+                self.job.product_text = _desc
+                _pn = str(info.get("name") or "").strip()
+                if _pn:
+                    self.job.params = dict(self.job.params or {})
+                    self.job.params.setdefault("product_name", _pn)
+                log("S0", "★产品识别（VL）：%s ｜ %s" % (_pn or "?", _desc[:120]))
+                if str(info.get("uncertain") or "").strip():
+                    log("S0", "  ⚠️ 识别不确定项：%s" % str(info["uncertain"])[:100])
+            else:
+                log("S0", "⚠️ 产品识别未成功 ⇒ 交给 ClipForge 的文字描述为空"
+                    "（**风险：LLM 可能自由发挥编造产品**）")
+        elif CFG.get("vl_product_analysis", True):
+            log("S0", "产品描述由用户提供 ⇒ 跳过 VL 识别（用户优先）")
         txt = self.job.product_text + "\n" + " ".join(self.job.product_images)
         # ★闸门①：像素级信号词（logo/中文标签/价格/复杂印刷）
         pixel_signals = ["logo", "LOGO", "商标", "标签", "价格", "¥", "元", "净含量", "配料", "说明"]
