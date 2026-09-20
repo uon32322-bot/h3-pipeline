@@ -28,6 +28,8 @@ side_a 契约（orchestrator.py S1 期望）：
 """
 from __future__ import annotations
 
+import pathlib
+import hashlib
 import argparse
 import base64
 import json
@@ -313,6 +315,77 @@ def gate_p3(shots: list[dict], requested_duration: float | None = None) -> dict:
     }
 
 
+
+# ══════════════════════════════════════════════════════════════════
+# 钩子选型（B方案：服务端先定 hook_type，把骨架硬性传给 ClipForge）
+#   数据来源: 巨量星图·电商带货榜(美妆) 54 条对标拆解 -> config/hook_library.json
+#   设计: 确定性选型(同一产品恒定同一钩子) —— 消除 ClipForge 自由发挥的方差
+# ══════════════════════════════════════════════════════════════════
+LIB_PATH = pathlib.Path(__file__).resolve().parent.parent / "config" / "hook_library.json"
+_HOOK_LIB: dict | None = None
+
+def _hook_lib() -> dict:
+    global _HOOK_LIB
+    if _HOOK_LIB is None:
+        try:
+            _HOOK_LIB = json.loads(LIB_PATH.read_text(encoding="utf-8")) if LIB_PATH.exists() else {}
+        except Exception as e:
+            print(f"[hook] ⚠️ 读取钩子库失败({e})，将不退化为无钩子约束")
+            _HOOK_LIB = {}
+    return _HOOK_LIB
+
+
+# 品类 -> 允许钩子池（数据来自对标拆解；认知度高品类禁 H3 负向场景）
+_HOOK_STRATEGY = [
+    (("唇釉", "口红", "唇膏", "唇泥", "唇彩", "唇部"), ["H6", "H1"]),
+    (("肌", "精华", "面霜", "乳", "洗面", "面膜", "防晒", "眼霜", "喷雾"), ["H3", "H1", "H5"]),
+]
+
+
+def pick_hook(category: str = "", name: str = "", desc: str = "") -> dict | None:
+    """确定性选型：同产品恒定同钩子。返回 hook dict（含 id/名称/骨架/约束）。"""
+    lib = _hook_lib()
+    hooks = {h["id"]: h for h in lib.get("钩子库", [])}
+    if not hooks:
+        return None
+    blob = f"{category} {name} {desc}"
+    pool = None
+    for kws, ids in _HOOK_STRATEGY:
+        if any(k in blob for k in kws):
+            pool = ids
+            break
+    if pool is None:
+        pool = ["H1", "H2", "H4", "H5"]
+    pool = [i for i in pool if i in hooks]
+    if not pool:
+        return None
+    # 确定性：按 产品名+品类 的稳定哈希取一个（同产品恒同钩子）
+    h = int(hashlib.md5((str(category) + "|" + str(name)).encode("utf-8")).hexdigest()[:8], 16)
+    return hooks[pool[h % len(pool)]]
+
+
+def build_hook_spec(hook: dict) -> str:
+    """把钩子约束渲染成给 LLM 的硬性指令块。"""
+    if not hook:
+        return ""
+    c = hook.get("约束", {})
+    L = [
+        "【钩子类型（已由服务端指定，不得更换）】" + hook["名称"] + " (" + hook["id"] + ")",
+        "骨架: " + hook["骨架"],
+    ]
+    if hook.get("骨架示例"):
+        L.append("结构参考（只借用句式结构，内容必须全部替换为本产品事实）:")
+        L += ["  - " + x for x in hook["骨架示例"][:3]]
+    if c.get("必须"):
+        L.append("必须: " + "；".join(c["必须"]))
+    if c.get("禁止"):
+        L.append("禁止: " + "；".join(c["禁止"]))
+    if hook.get("动作化要求"):
+        L.append("画面要求: " + hook["动作化要求"])
+    L.append("硬性要求: 开场第一句必须符合上述钩子类型；不得照抄结构参考中的任何具体内容。")
+    return "\n".join(L)
+
+
 # ══════════════════════════════════════════════════════════════════
 # ClipForge 调用 + 转换
 # ══════════════════════════════════════════════════════════════════
@@ -331,8 +404,20 @@ def fetch_clipforge(endpoint: str, *, name: str, desc: str, category: str = "oth
         "productImages": [img_to_data_uri(p) for p in (images or [])],
         "insightMode": False,          # 单机部署无转化数据，关掉飞轮以免注入噪声
     }
-    if extra_requirements:
-        payload["customRequirements"] = extra_requirements[:2000]
+    # ── B方案: 服务端先定钩子，把骨架硬性注入（消除自由发挥的方差） ──
+    _hook = pick_hook(category=category, name=name, desc=desc)
+    _hspec = build_hook_spec(_hook)
+    if _hspec:
+        print(f"[hook] 选定钩子 = {_hook['id']} {_hook['名称']}")
+    # 钩子规格放最前 —— ClipForge route.ts 只取前 2000 字符，追加末尾会被静默截断
+    _req = (_hspec + "\n\n" + (extra_requirements or "").strip()).strip()
+    if _req:
+        _req = _req[:2000]
+        payload["customRequirements"] = _req
+    else:
+        payload.pop("customRequirements", None)
+    payload["hookSpec"] = _hspec          # 显式字段，便于调试与后续 prompts.ts 直读
+    payload["hookType"] = (_hook or {}).get("id", "")
     return _post_json(endpoint.rstrip("/") + "/api/llm/script", payload, timeout=timeout)
 
 
