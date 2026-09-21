@@ -255,7 +255,17 @@ def build_storyboard_v2(product_info: dict, copy: dict) -> list:
     tagline = copy.get("tagline", "") if isinstance(copy, dict) else ""
     sp = (copy.get("selling_points", ["卖点"]) if isinstance(copy, dict) else ["卖点"])[:3]
     sys_p = """8s 带货分镜师。回复必须是严格 JSON 数组, 不要 markdown 包装.
-6 元素 [{beat_id,time_range:[s,e],keyframe,description}]
+
+**字段名严格规范 (避免被识别为"格式错")**:
+- 每镜用以下任一格式, **统一字段名**:
+  - 格式 A (我们): {beat_id, time_range:[s,e], keyframe, description}
+  - 格式 B (gem 自然): {shot_id, time:"0-2s", scene, visual, audio}
+- 如果你倾向输出 4 镜, 时间累加必须 = 8s (例: 0-2, 2-4, 4-6, 6-8)
+- 如果你倾向输出 6 镜, 时间累加必须 ≤8s (例: 0-1.3, 1.3-2.6 ... 6.5-8.0)
+- 每镜 visual/description 必须包含: 主体外观 + 产品形态(形态+颜色) + 手部动作(拇指/食指/掌心/虎口) + negation (NOT 口红/NOT 香水)
+- description 可以包含 audio (口播) 信息, 用"|"分隔
+
+6 元素 (推荐) [{beat_id|shot_id,time_range|time:[s,e]或"0-2s",keyframe|scene,description|visual}]
 
 **8 维度 + 否定锚点 + 物理形态优先** (来自 skill: h3-prompt-8-dimensions-and-hallucination-defense):
 
@@ -285,19 +295,41 @@ def build_storyboard_v2(product_info: dict, copy: dict) -> list:
 3. **禁止时序跳变词**: 不用"随后/接着/然后/连续切换/三晚/三天后"
 4. **镜1镜6镜像**: 起始微笑+结尾微笑展示
 5. **中间 2 镜是核心动作**: 涂抹类=膏体贴+涂抹, 穿戴类=穿戴+展示, 食品类=开包装+品尝
-6. **产品前 3 秒入画**: 镜1画面必须让产品实体出现 (拿手里/摆桌面/人物使用)"""
+6. **产品前 3 秒入画**: 镜1画面必须让产品实体出现 (拿手里/摆桌面/人物使用)
+
+**卖点→分镜 强对应 (来自 K5 评测, 关键硬约束)**:
+- **每个文案卖点 (selling_points) 必须被 6 镜中至少 1 镜直接体现**, 不能丢
+- **tagline 的"钩子元素"必须出现在镜1或镜6** (开场钩子或结尾呼应)
+- **scene 描述的场景必须是镜2-5 的核心场景**
+- 6 镜**整体必须能"看完就懂"3 个卖点**, 不能只展示产品外观不展示卖点动作
+
+**卖点映射示例**:
+- 文案: "扔进洗衣机洗50次" → 分镜镜5: 必须有"洗衣机/手洗/挂晾"动作
+- 文案: "100s棉滑得像没布" → 分镜镜3-4: 必须有"手抚被套面料/脸贴被套"特写
+- 文案: "A类母婴级, 宝宝都能睡" → 分镜镜2: 必须有"宝宝入画躺下"动作
+- 文案: "化纤被套捂出红疹" → 分镜镜1: 必须有"化纤被套对比/红疹/问题展示" (痛点开场)"""
     user_p = f"""产品:{name}
 类别:{cat}
 **物理形态 (必填, 详细到材质+结构):** {shape or pf}
 颜色:{color}
-钩子:{tagline}
-卖点:{sp}
+**tagline (钩子, 镜1或镜6 必须呼应):** {tagline}
+**selling_points (3 个, 每个必须被至少 1 镜直接体现):**
+  - SP1: {sp[0] if len(sp) > 0 else ''}
+  - SP2: {sp[1] if len(sp) > 1 else ''}
+  - SP3: {sp[2] if len(sp) > 2 else ''}
+scene: {copy.get('scene', '') if isinstance(copy, dict) else ''}
 
-请输出严格 6 镜 JSON 数组, 每镜 description 必须包含:
-1. 具体产品形态描述 (不是只说颜色)
+请输出严格 6 镜 JSON 数组:
+- 镜1: 对应 tagline 钩子 (开场)
+- 镜2-5: 对应 3 个 SP (每个 SP 至少 1 镜)
+- 镜6: 镜像镜1, 呼应钩子或收尾展示
+
+每镜 description 必须包含:
+1. 具体产品形态描述 (形态+颜色)
 2. 手部动作 (拇指/食指/掌心/虎口等)
 3. negation 词 (NOT 口红/NOT 香水 等)
-4. 时长累加 ≤8s"""
+4. 对应哪个 SP 或 tagline 元素
+5. 时长累加 ≤8s"""
     last_err = None
     for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
         # gem-3.7-flash 用 2500 tokens (更长的 8 维度 prompt 需要)
@@ -314,17 +346,53 @@ def build_storyboard_v2(product_info: dict, copy: dict) -> list:
             if not isinstance(beats, list):
                 last_err = f"{m} 返回非 list"
                 continue
+            # 字段映射: gem-3.7-flash 用 shot_id/time/visual/audio/text_overlay
+            # 我们的标准是 beat_id/time_range/description/keyframe
+            # 这里做容错: visual→description, scene→keyframe, time→time_range
+            for i, b in enumerate(beats):
+                if not isinstance(b, dict):
+                    beats[i] = {"beat_id": i+1, "time_range": [i*1.3, (i+1)*1.3],
+                                "keyframe": f"sec{i}", "description": f"镜{i+1}: (内容缺失)"}
+                    continue
+                # 描述 (visual 优先, 否则拼接 audio)
+                if "description" not in b:
+                    desc_parts = []
+                    if "visual" in b: desc_parts.append(str(b["visual"]))
+                    if "audio" in b: desc_parts.append("口播: " + str(b["audio"]))
+                    if not desc_parts and "scene" in b:
+                        desc_parts.append(str(b["scene"]))
+                    b["description"] = " | ".join(desc_parts) if desc_parts else f"镜{i+1}: (内容缺失)"
+                # 镜号
+                if "beat_id" not in b:
+                    b["beat_id"] = b.get("shot_id", i+1)
+                # 时间 (time "0-2s" 格式 → [0.0, 2.0])
+                if "time_range" not in b:
+                    time_str = str(b.get("time", ""))
+                    m = re.match(r'(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)', time_str)
+                    if m:
+                        b["time_range"] = [float(m.group(1)), float(m.group(2))]
+                    else:
+                        b["time_range"] = [i*1.3, (i+1)*1.3]
+                # keyframe (scene → keyframe)
+                if "keyframe" not in b:
+                    b["keyframe"] = b.get("scene", f"sec{i}")
+            # 长度调整: 多了截 6, 少了用 fallback 补
             if len(beats) > 6:
                 beats = beats[:6]
+                # 重新校准 time_range 到 0-8s 等分
+                for i, b in enumerate(beats):
+                    b["time_range"] = [i * 8.0 / 6, (i + 1) * 8.0 / 6]
             elif len(beats) < 6:
-                beats = _fallback_storyboard(product_info)
+                # 用 fallback 补齐缺口 (但保留 gem 已生成的部分)
+                fallback = _fallback_storyboard(product_info)
+                while len(beats) < 6:
+                    beats.append(fallback[len(beats)])
+            # 强制 time_range 累加 ≤8s (重新分配)
             for i, b in enumerate(beats):
-                if not all(k in b for k in ("beat_id", "time_range", "description")):
-                    b["beat_id"] = i + 1
-                    b["time_range"] = [i * 1.3, (i + 1) * 1.3]
-                    b["keyframe"] = f"sec{i}"
-                    if "description" not in b:
-                        b["description"] = f"镜{i+1}: (内容缺失)"
+                b["time_range"] = [i * 8.0 / 6, (i + 1) * 8.0 / 6]
+                b["beat_id"] = i + 1
+                if not isinstance(b.get("description"), str) or len(b["description"]) < 5:
+                    b["description"] = f"镜{i+1}: (内容缺失)"
             for b in beats:
                 b["_model"] = m
             return beats
