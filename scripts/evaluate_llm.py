@@ -38,28 +38,73 @@ LLM_MODELS = [
 ]
 
 # 3 个产品 (你后面填充)
+BASE_LOCAL = "/Users/admin/Desktop/新测试 0921"
+BASE_RESULT = "/Users/admin/Desktop/新测试 0921/测试结果"
+
 PRODUCTS = [
+    # id 是文件夹名 (跟新测试 0921/ 一致)
     {
-        "id": "K6_cleanser",
-        "name": "氨基酸温和洁面乳",
-        "image_local": "/Users/admin/Desktop/工具/测试产品/K6_清洁日化_洁面/主图.png",
-        "image_remote": "/tmp/eval_K6_cleanser.png",
-        "text_local": "/Users/admin/Desktop/工具/测试产品/K6_清洁日化_洁面/产品信息.txt",
-    },
-    # 产品 2 和 3 — 你填
-    {
-        "id": "PRODUCT_2_ID",
-        "name": "PRODUCT_2_NAME",
-        "image_local": "/Users/admin/Desktop/PATH/TO/PRODUCT_2.png",
-        "image_remote": "/tmp/eval_PRODUCT_2.png",
-        "text_local": "/Users/admin/Desktop/PATH/TO/PRODUCT_2_info.txt",
+        "id": "01_洁面乳",
+        "name": "净澈·氨基酸温和洁面乳",
+        "image_local": f"{BASE_LOCAL}/01_洁面乳/洁面乳_白底主图.png",
+        "image_remote": "/tmp/eval_01_cleanser.png",
+        "text_local": f"{BASE_LOCAL}/01_洁面乳/洁面乳_产品信息.txt",
     },
     {
-        "id": "PRODUCT_3_ID",
-        "name": "PRODUCT_3_NAME",
-        "image_local": "/Users/admin/Desktop/PATH/TO/PRODUCT_3.png",
-        "image_remote": "/tmp/eval_PRODUCT_3.png",
-        "text_local": "/Users/admin/Desktop/PATH/TO/PRODUCT_3_info.txt",
+        "id": "02_口红",
+        "name": "丝绒哑光口红",
+        "image_local": f"{BASE_LOCAL}/02_口红/口红_白底主图.png",
+        "image_remote": "/tmp/eval_02_lipstick.png",
+        "text_local": f"{BASE_LOCAL}/02_口红/口红_产品信息.txt",
+    },
+    {
+        "id": "03_零食",
+        "name": "厚切脆薯片大袋装",
+        "image_local": f"{BASE_LOCAL}/03_零食/零食_白底主图.png",
+        "image_remote": "/tmp/eval_03_snack.png",
+        "text_local": f"{BASE_LOCAL}/03_零食/零食_产品信息.txt",
+    },
+    {
+        "id": "04_积木",
+        "name": "儿童大颗粒益智积木套装",
+        "image_local": f"{BASE_LOCAL}/04_积木/积木_白底主图.png",
+        "image_remote": "/tmp/eval_04_blocks.png",
+        "text_local": f"{BASE_LOCAL}/04_积木/积木_产品信息.txt",
+    },
+    {
+        "id": "05_水果",
+        "name": "新鲜时令水果组合装",
+        "image_local": f"{BASE_LOCAL}/05_水果/水果_白底主图.png",
+        "image_remote": "/tmp/eval_05_fruit.png",
+        "text_local": f"{BASE_LOCAL}/05_水果/水果_产品信息.txt",
+    },
+    {
+        "id": "06_男士运动鞋",
+        "name": "男士轻量透气跑步鞋",
+        "image_local": f"{BASE_LOCAL}/06_男士运动鞋/男士运动鞋_白底主图.png",
+        "image_remote": "/tmp/eval_06_shoes.png",
+        "text_local": f"{BASE_LOCAL}/06_男士运动鞋/男士运动鞋_产品信息.txt",
+    },
+    {
+        "id": "07_空气炸锅",
+        "name": "家用智能空气炸锅",
+        "image_local": f"{BASE_LOCAL}/07_空气炸锅/空气炸锅_白底主图.png",
+        "image_remote": "/tmp/eval_07_airfryer.png",
+        "text_local": f"{BASE_LOCAL}/07_空气炸锅/空气炸锅_产品信息.txt",
+    },
+    {
+        "id": "08_牙膏",
+        "name": "净澈·沁爽薄荷美白牙膏",
+        "image_local": f"{BASE_LOCAL}/08_牙膏/牙膏_白底主图.png",
+        "image_remote": "/tmp/eval_08_toothpaste.png",
+        "text_local": f"{BASE_LOCAL}/08_牙膏/牙膏_产品信息.txt",
+    },
+    {
+        "id": "09_头戴式耳机",
+        "name": "头戴式无线降噪耳机",
+        "image_local": f"{BASE_LOCAL}/09_头戴式耳机/头戴式耳机_白底主图.png",
+        "image_remote": "/tmp/eval_09_headphone.png",
+        "text_local": f"{BASE_LOCAL}/09_头戴式耳机/头戴式耳机_产品信息.txt",
     },
 ]
 
@@ -523,57 +568,79 @@ for p in PRODUCTS:
     if stderr:
         print("STDERR:", stderr[-500:])
 
-    # 3. 拉回所有 grid + 报告
-    import subprocess
-    env = os.environ.copy()
-    env["SSH_ASKPASS"] = os.path.expanduser("~/.ssh/askpass_nmb2.sh")
-    env["SSH_ASKPASS_REQUIRE"] = "force"
-    sopts = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
-              "-o", "ConnectTimeout=10"]
-    H = "root@connect.nmb2.seetacloud.com"
-    Path(EVAL_DIR_LOCAL).mkdir(parents=True, exist_ok=True)
+    # 3. 拉回所有 grid + 按产品分文件夹保存
+        # 结构:
+        #   BASE_RESULT/{product_id}/
+        #     {model}.json              # 该模型对该产品的完整输出 (识别+文案+分镜)
+        #     {model}_grid.png         # 该模型生成的宫格图
+        #     summary.md               # 该产品的对比总结 (由 gen_summary 写)
+        import subprocess
+        env = os.environ.copy()
+        env["SSH_ASKPASS"] = os.path.expanduser("~/.ssh/askpass_nmb2.sh")
+        env["SSH_ASKPASS_REQUIRE"] = "force"
+        sopts = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                  "-o", "ConnectTimeout=10"]
+        H = "root@connect.nmb2.seetacloud.com"
 
-    print("\n=== 拉回所有 grid 图片 ===")
-    for p in PRODUCTS:
-        for m in LLM_MODELS:
-            remote_grid = f"{EVAL_DIR_REMOTE}/{p['id']}_{m}_grid.png"
-            local_grid = f"{EVAL_DIR_LOCAL}/{p['id']}_{m}_grid.png"
-            r = subprocess.run(["scp"] + sopts + ["-P", "36229",
-                f"{H}:{remote_grid}", local_grid],
-                capture_output=True, text=True, env=env, timeout=30)
-            if r.returncode == 0:
-                print(f"  ✓ {local_grid}")
-            else:
-                print(f"  ✗ {local_grid}: {r.stderr[:100]}")
+        print("\n=== 拉回所有产物 (按产品分文件夹) ===")
+        for p in PRODUCTS:
+            product_dir = f"{BASE_RESULT}/{p['id']}"
+            Path(product_dir).mkdir(parents=True, exist_ok=True)
+            print(f"\n  产品 {p['id']} → {product_dir}")
+            for m in LLM_MODELS:
+                remote_grid = f"{EVAL_DIR_REMOTE}/{p['id']}_{m}_grid.png"
+                local_grid = f"{product_dir}/{m}_grid.png"
+                r = subprocess.run(["scp"] + sopts + ["-P", "36229",
+                    f"{H}:{remote_grid}", local_grid],
+                    capture_output=True, text=True, env=env, timeout=30)
+                if r.returncode == 0:
+                    print(f"    ✓ {m}_grid.png")
+                else:
+                    print(f"    ✗ {m}_grid.png: {r.stderr[:80]}")
 
-    # 4. 生成对比报告
-    print("\n=== 生成对比报告 ===")
-    report_lines = [
-        "# LLM 评测报告",
-        "",
-        f"对比模型: {', '.join(LLM_MODELS)}",
-        f"测试产品: {len(PRODUCTS)} 个",
-        "",
-        "## 评审指标 (由你)",
-        "",
-        "1. 产品识别 - 类别准确？卖点具体？",
-        "2. 文案 - 口语化？钩子有力？卖点不杜撰？CTA 匹配？",
-        "3. 分镜 - 6 镜时间总和 ≤8s？动作细到手指？品类按钮？",
-        "4. 宫格图 - 6 格一致？产品形态锁？无乱漂？",
-        "",
-        "## 宫格图位置",
-        "",
-    ]
-    for p in PRODUCTS:
-        report_lines.append(f"### {p['id']} ({p['name']})")
-        for m in LLM_MODELS:
-            report_lines.append(f"- [{m}]({p['id']}_{m}_grid.png)")
-        report_lines.append("")
-    report_lines.append("## JSON 输出位置")
-    report_lines.append(f"远端: {EVAL_DIR_REMOTE}/<product>_<model>.json")
-    report_path = f"{EVAL_DIR_LOCAL}/report.md"
-    Path(report_path).write_text("\n".join(report_lines))
-    print(f"  ✓ {report_path}")
+                # 同时拉 JSON (含 识别+文案+分镜)
+                remote_json = f"{EVAL_DIR_REMOTE}/{p['id']}_{m}.json"
+                local_json = f"{product_dir}/{m}.json"
+                r = subprocess.run(["scp"] + sopts + ["-P", "36229",
+                    f"{H}:{remote_json}", local_json],
+                    capture_output=True, text=True, env=env, timeout=15)
+                if r.returncode == 0:
+                    print(f"    ✓ {m}.json")
+
+        # 4. 生成对比报告 (按产品)
+        print("\n=== 生成对比报告 (按产品) ===")
+        Path(BASE_RESULT).mkdir(parents=True, exist_ok=True)
+        report_lines = [
+            "# LLM 评测报告 (4 模型 × 9 产品)",
+            "",
+            f"对比模型: {', '.join(LLM_MODELS)}",
+            f"测试产品: {len(PRODUCTS)} 个",
+            f"总输出套数: {len(LLM_MODELS) * len(PRODUCTS)}",
+            "",
+            "## 评审指标 (由你)",
+            "",
+            "1. 产品识别 - 类别准确? 卖点具体?",
+            "2. 文案 - 口语化? 钩子有力? 卖点不杜撰? CTA 匹配?",
+            "3. 分镜 - 6 镜时间总和 ≤8s? 动作细到手指? 品类按钮?",
+            "4. 宫格图 - 6 格一致? 产品形态锁? 无乱漂?",
+            "",
+            "## 宫格图位置 (按产品分文件夹)",
+            "",
+        ]
+        for p in PRODUCTS:
+            report_lines.append(f"### {p['id']} ({p['name']})")
+            for m in LLM_MODELS:
+                report_lines.append(f"- [{m}]({p['id']}/{m}_grid.png) + [{m}.json]({p['id']}/{m}.json)")
+            report_lines.append("")
+        report_lines.append("## JSON 输出位置 (远端)")
+        report_lines.append(f"远端: {EVAL_DIR_REMOTE}/<product>_<model>.json (含 grid_path)")
+        report_path = f"{BASE_RESULT}/report.md"
+        Path(report_path).write_text("\n".join(report_lines))
+        print(f"  ✓ {report_path}")
+        print("\n=== 跑完通知: 所有产物已保存到 {BASE_RESULT}/ ===")
+        print(f"    - 每个产品 1 个子文件夹: {BASE_RESULT}/<产品名>/")
+        print(f"    - 每个子文件夹含 4 个 LLM 的 grid 图 + json")
+        print(f"    - 顶层对比报告: {report_path}")
 
 
 if __name__ == "__main__":
