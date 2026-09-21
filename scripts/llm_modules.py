@@ -123,8 +123,26 @@ def recognize_product(image_path: str, product_text: str = "",
     """
     data_uri = img_b64_uri(image_path)
     prompt = f"""你是产品识别专家。只输出 JSON 对象, 不要 markdown 包装.
-格式: {{"category":"品类","name":"产品名","color":"主色调","shape":"包装形态","key_attributes":["卖点1","卖点2","卖点3"],"skin_tone_match":"肤色","usage_scene":"场景","product_form":"tube/bottle/jar/compact/box"}}
-{f'用户文字信息(优先): {product_text[:300]}' if product_text else ''}"""
+
+**重要 (8 维度 + 否定锚点 + 物理形态优先)**:
+1. **物理形态先于颜色**: 必填"包装形态"字段, 写"翻盖塑料软管/金色方管/矮胖圆瓶/..."而不是"塑料瓶"
+2. **形态细到细节**: 管长/粗细/瓶口类型/是否有翻盖/是否有按钮
+3. **不要做联想**: 只输出你看图能确认的事实, 不杜撰
+4. **避免幻觉化**: 红+金+管身 ≠ 一定是口红 (可能是香水笔/眼线笔), 必须看真实形态
+
+输出格式 (严格按字段顺序):
+{{
+  "category": "口红/洁面乳/护肤品/家电/服饰/食品/...",
+  "name": "品牌+产品名",
+  "color": "主色调 (如'正红色'/'白色'/'银灰色')",
+  "shape": "包装形态 (必须细: '翻盖塑料软管白色管身银色翻盖'/'金色方管磁吸盖'/'矮胖圆瓶按压泵头')",
+  "key_attributes": ["卖点1", "卖点2", "卖点3"],
+  "skin_tone_match": "冷白皮/暖黄皮/百搭/不限",
+  "usage_scene": "通勤/约会/家居/学习/...",
+  "product_form": "tube/bottle/jar/compact/box (用其中一个值)"
+}}
+
+{f'用户文字信息(优先, 当与图冲突时以文字为准): {product_text[:400]}' if product_text else ''}"""
     models = [PRIMARY_MODEL, SECONDARY_MODEL] if primary_first else [SECONDARY_MODEL, PRIMARY_MODEL]
     last_err = None
     for m in models:
@@ -163,12 +181,28 @@ def build_copy_v2(product_info: dict, product_text: str = "") -> dict:
     sys_p = """5 段式带货口播稿专家。回复必须是严格 JSON, 不要其他文字, 不要 markdown.
 格式: {"tagline":"1-2句钩子","selling_points":["s1","s2","s3"],"scene":"使用场景","cta":"点击下方小黄车直接下单"}
 
-硬约束 (来自 skill: copywriting-judge-optimization + storyboard-script-quality):
+**8 维度 + 否定锚点 + 物理形态优先** (必须贯穿文案):
+1. **物理形态先于颜色**: 文案中提到产品时, 必须描述"形态+颜色", 不能只说颜色
+   ✅ "翻盖塑料软管白色管身" / "金色方管磁吸盖" / "矮胖圆瓶按压泵头"
+   ❌ "白色管身" / "金色管" (只有颜色, 没有形态)
+2. **否定锚点 (negation)**: 文案不要把产品描述成其它品类
+   例: 洁面乳 ≠ 口红 ≠ 香水 ≠ 粉底; 牙膏 ≠ 洁面乳; 耳机 ≠ 音箱
+   写到卖点时, 不要让读者误以为是其他产品
+3. **形态决定动作**: 不同形态对应不同使用动作
+   tube (软管) → 挤压 / squeeze
+   bottle (瓶) → 按压 / 倾倒 / 喷
+   jar (罐) → 挖取 / scoop
+   compact (盒) → 打开 / 翻盖
+4. **避免幻觉化联想**: 不要因为颜色联想品类
+   红色软管 + 金色翻盖 → 可能是香水笔/眼线笔/护手霜, 不一定是口红
+
+**5 段式硬约束** (来自 skill: copywriting-judge-optimization + storyboard-script-quality):
 1. 钩子必须用"危言耸听/反常识/提问"之一 (例: "地铁再吵也别硬扛!"), 禁用"大家好"开场
 2. 3 条卖点必须"1 个具体画面 + 1 句购买理由" (例: 涂完去吃饭不掉色), 禁用空泛词 (顺/利落/显精神/好用)
 3. 禁止杜撰数字 (如"白两度"/"16小时持妆"), 数字必须与产品一致
-4. ≤25字/段, 口语化, 像说话不像写作"""
-    user_p = f"产品:{product_info.get('name','?')}, 类别:{product_info.get('category','')}, 卖点:{sp_str}, 用户文字:{product_text[:400] if product_text else ''}"
+4. ≤25字/段, 口语化, 像说话不像写作
+5. 形态贯穿: 卖点里描述使用动作时, 必须符合产品形态 (例: 软管 = 挤压; 瓶 = 按压)"""
+    user_p = f"产品:{product_info.get('name','?')}, 类别:{product_info.get('category','')}, 形态:{product_info.get('shape', product_info.get('product_form',''))}, 卖点:{sp_str}, 用户文字:{product_text[:400] if product_text else ''}\n\n请生成严格 5 段式 JSON, 文案中必须体现产品物理形态"
     last_err = None
     for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
         try:
@@ -216,30 +250,65 @@ def build_storyboard_v2(product_info: dict, copy: dict) -> list:
     cat = product_info.get("category", "")
     name = product_info.get("name", "")
     pf = product_info.get("product_form", "tube")
+    shape = product_info.get("shape", "")  # 包装形态 (详细)
+    color = product_info.get("color", "")
     tagline = copy.get("tagline", "") if isinstance(copy, dict) else ""
     sp = (copy.get("selling_points", ["卖点"]) if isinstance(copy, dict) else ["卖点"])[:3]
     sys_p = """8s 带货分镜师。回复必须是严格 JSON 数组, 不要 markdown 包装.
 6 元素 [{beat_id,time_range:[s,e],keyframe,description}]
 
-硬约束 (来自 skill: storyboard-script-quality + h3-prompt-8-dimensions):
+**8 维度 + 否定锚点 + 物理形态优先** (来自 skill: h3-prompt-8-dimensions-and-hallucination-defense):
+
+| 维度 | 必填 | 示例 |
+|---|---|---|
+| subject | 人物外观 | 椭圆脸/单眼皮/小尖鼻/长直发 |
+| product_form | **物理形态先于颜色** | 白色塑料软管+翻盖 / 金色方管+磁吸盖 / 矮胖圆瓶+按压泵头 |
+| hand_action | 手部细到指节 | 拇指+食指捏住 / 掌心托住 / 虎口卡住 |
+| purpose | 动作目的 | 挤压膏体到掌心 / 展示口红外观 |
+| quantity | 数量限定 | only ONE product visible |
+| negation | 否定锚点 | NOT lipstick / NOT perfume / NOT foundation / no red color |
+| camera | 镜头景别 | close-up on hands / macro on face |
+| time_text | 时间范围 | Between 0.000s and 1.300s |
+
+**形态约束 (避免幻觉化)**:
+- 描述产品时必须**形态+颜色**组合: "白色塑料软管" 而非 "白色管身"
+- 不同形态对应不同使用动作:
+  tube (软管) → 拇指食指挤压 / squeeze
+  bottle (瓶) → 按压 / 倾倒 / 喷
+  jar (罐) → 挖取
+  compact (盒) → 翻开 / 打开
+- 否定锚点必填: 每镜 description 里至少出现 1 个 negation 词 (不是口红/不是香水/不要红色)
+
+**4 类硬约束** (来自 skill: storyboard-script-quality):
 1. **时长严格**: 总时长 6 镜累加 ≤8s, 单镜 ≤1.3s (典型 0.0-1.3/1.3-2.6/2.6-3.9/3.9-5.2/5.2-6.5/6.5-8.0)
 2. **单镜动作唯一**: 每镜只允许 1 个主动作 (如"涂抹"), 最多 1 个次动作; 禁止 2+ 动作串联
 3. **禁止时序跳变词**: 不用"随后/接着/然后/连续切换/三晚/三天后"
-4. **手部动作细到指节**: 拇指/食指/掌心/虎口/手腕/指腹等具体位置, 不用"展示产品"
-5. **物理形态先于颜色**: 写"白色塑料软管+翻盖" 而非 "白色管身"; 必含 negation (不要口红/香水/粉底)
-6. **镜1镜6镜像**: 起始微笑+结尾微笑展示
-7. **中间 2 镜是核心动作**: 涂抹类=膏体贴+涂抹, 穿戴类=穿戴+展示, 食品类=开包装+品尝
-8. **产品前 3 秒入画**: 镜1画面必须让产品实体出现 (拿手里/摆桌面/人物使用)
-9. **数量限定**: only ONE product 出现"""
-    user_p = f"产品:{name}, 类别:{cat}, 形态:{pf}, 钩子:{tagline}, 卖点:{sp}. 输出严格 6 镜 JSON 数组, 时长严格 ≤8s"
+4. **镜1镜6镜像**: 起始微笑+结尾微笑展示
+5. **中间 2 镜是核心动作**: 涂抹类=膏体贴+涂抹, 穿戴类=穿戴+展示, 食品类=开包装+品尝
+6. **产品前 3 秒入画**: 镜1画面必须让产品实体出现 (拿手里/摆桌面/人物使用)"""
+    user_p = f"""产品:{name}
+类别:{cat}
+**物理形态 (必填, 详细到材质+结构):** {shape or pf}
+颜色:{color}
+钩子:{tagline}
+卖点:{sp}
+
+请输出严格 6 镜 JSON 数组, 每镜 description 必须包含:
+1. 具体产品形态描述 (不是只说颜色)
+2. 手部动作 (拇指/食指/掌心/虎口等)
+3. negation 词 (NOT 口红/NOT 香水 等)
+4. 时长累加 ≤8s"""
     last_err = None
     for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
+        # gem-3.7-flash 用 2500 tokens (更长的 8 维度 prompt 需要)
+        max_tok = 2500 if m == PRIMARY_MODEL else 3000
+        timeout = 90 if m == SECONDARY_MODEL else 90  # gem 慢的时候也 90s
         try:
             raw = call_lk888(
                 m,
                 [{"role": "system", "content": sys_p},
                  {"role": "user", "content": user_p}],
-                temperature=0.6, max_tokens=2000,
+                temperature=0.6, max_tokens=max_tok, timeout=timeout,
             )
             beats = parse_json_strict(raw)
             if not isinstance(beats, list):
