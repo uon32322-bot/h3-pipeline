@@ -1,0 +1,29 @@
+subject_definitions:
+<Subject 1> is a 25-year-old East Asian woman, round face, single-eyelid almond eyes with subtle under-eye, small pointed nose, thin natural-pink lips, long straight black hair with a side part, wearing a cream beige cotton crew-neck T-shirt. Preserve her facial identity, hairstyle, body proportions, and outfit exactly across the entire clip.
+<Subject 2> is the 复古红 lipstick from <Picture 1>, a single lipstick tube (rectangular flat gold metallic box) with a red slanted bullet protruding from the top. Preserve the exact product shape, 复古红 color, and red bullet. Only one lipstick ever appears.
+
+summary:
+[keyframe completion] The target video shows <Subject 1> applying <Subject 2> in a continuous 8-second one-take shot, transitioning from bare-lipped smile at the start to full 复古红-lip smile at the end, mirroring the start pose.
+
+retention_analysis:
+<Subject 1> (appears in the entire clip): fully_preserved - retain her facial identity, hairstyle, body proportions, and cream beige cotton crew-neck T-shirt throughout.
+<Subject 2> (appears in frames 0-6s and 7-8s): fully_preserved - retain exact gold square shape, 复古红 color, red slanted bullet.
+<Picture 1> (scene anchor): fully_preserved - warm beige home interior background, soft natural window light from the left.
+
+detailed_description:
+Live-action authentic TikTok/Reels UGC style with realistic skin texture, smartphone camera, stable tripod-steady framing, no camera shake, realistic shadows, no plastic-looking skin. One continuous shot, no cuts.
+
+[Shot 1] Between 0.000s and 1.000s, 模特抬眼看镜头 + 微笑 + 右手食指+拇指持YSL方管口红, 嘴唇自然裸色
+[Shot 2] Between 1.000s and 3.000s, 模特低头闭眼, 双手拇指+食指拧开YSL方管口红金盖, 露出红色膏体
+[Shot 3] Between 3.000s and 4.000s, 模特微抬头嘴微张, 右手持YSL方管口红膏体贴近下唇左侧, 开始向左→右缓慢涂抹
+[Shot 4] Between 4.000s and 5.000s, 镜头特写嘴部, 膏体完成下唇, 移到上唇左侧开始向左→右涂抹
+[Shot 5] Between 5.000s and 6.000s, 膏体完成上唇, 模特闭眼仰头抿嘴, 让颜色服帖
+[Shot 6] Between 6.000s and 8.000s, 模特抬眼微笑看镜头, 右手食指+拇指持YSL方管口红, 唇色饱和满红, 与镜1形成镜像
+
+No additional people, no other products, no mirrors, no reflections appear at any point. The single lipstick stays in one hand throughout. The cream beige cotton crew-neck T-shirt stays the same color and shape throughout.
+
+overall_soundscape:
+Quiet indoor room ambience, soft natural light hum.
+
+non_diegetic_music:
+N/A
