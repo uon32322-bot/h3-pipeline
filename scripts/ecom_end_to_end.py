@@ -348,15 +348,26 @@ def main():
     product_info = identify_product(args.product_image, args.product_text)
     print(f"  ✓ {product_info.get('name', '?')} - {product_info.get('color', '?')}")
 
-    print("\n[2/5] 创作文案 (规则模板)...")
-    copy = build_copy(product_info, args.product_text)
-    print(f"  ✓ tagline: {copy['tagline']}")
-    print(f"  ✓ selling_points: {copy['selling_points']}")
+    print("\n[2/5] 创作文案 (LLM 强化版, fallback 规则)...")
+    try:
+        from llm_modules import build_copy_v2
+        copy = build_copy_v2(product_info, args.product_text)
+        print(f"  ✓ tagline: {copy['tagline']}")
+        print(f"  ✓ selling_points: {copy['selling_points']}")
+    except Exception as e:
+        print(f"⚠️  build_copy_v2 不可用 ({e}), 用规则 fallback")
+        copy = build_copy(product_info, args.product_text)
 
-    print("\n[3/5] 生成分镜脚本 (6 镜固定, 每镜 ≤1.3s)...")
-    storyboard = build_storyboard(product_info, copy)
+    print("\n[3/5] 生成分镜脚本 (LLM 动态 6 镜, fallback 规则)...")
+    try:
+        from llm_modules import build_storyboard_v2
+        storyboard = build_storyboard_v2(product_info, copy)
+    except Exception as e:
+        print(f"⚠️  build_storyboard_v2 不可用 ({e}), 用规则 fallback")
+        storyboard = build_storyboard(product_info, copy)
     for b in storyboard:
-        print(f"  镜 {b['beat_id']}: [{b['time_range'][0]:.1f}-{b['time_range'][1]:.1f}s] {b['keyframe']}")
+        t0, t1 = b['time_range']
+        print(f"  镜 {b['beat_id']}: [{t0:.1f}-{t1:.1f}s] {b['keyframe']}")
 
     print("\n[4/5] 对齐官方六段 YAML prompt...")
     prompt = build_prompt(storyboard, product_info, copy)
