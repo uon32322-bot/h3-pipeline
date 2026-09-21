@@ -278,6 +278,9 @@ def render_fl2va_5guides(cells_dir: str, prompt: str, output_path: str) -> str:
     调用本地 templates/fl2va_5guides_red_apply/build_workflow.py
     (已 commit 在仓里, 0d333ed 基线)
     """
+    if not cells_dir:
+        raise ValueError("cells_dir 必填 (要么传 --cells-dir 要么 --use-lingxuan 自动生成)")
+
     repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     build_py = os.path.join(repo_dir, "templates", "fl2va_5guides_red_apply", "build_workflow.py")
     run_sh = os.path.join(repo_dir, "templates", "fl2va_5guides_red_apply", "run_render.sh")
@@ -336,7 +339,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--product-image", required=True, help="产品图本地路径")
     ap.add_argument("--product-text", default="", help="产品文字信息 (可选)")
-    ap.add_argument("--cells-dir", required=True, help="宫格切片 cell1.png~cell6.png 所在目录")
+    ap.add_argument("--cells-dir", default=None, help="本地已有 cell1-6.png 目录 (可选, --use-lingxuan 时不需要)")
+    ap.add_argument("--use-lingxuan", action="store_true", help="用灵炫自动生 6 宫格图")
     ap.add_argument("--output", required=True, help="最终视频输出本地路径")
     args = ap.parse_args()
 
@@ -369,12 +373,29 @@ def main():
         t0, t1 = b['time_range']
         print(f"  镜 {b['beat_id']}: [{t0:.1f}-{t1:.1f}s] {b['keyframe']}")
 
+    print("\n[3.5/5] 自动灵炫生 6 宫格图 (不需要 cells_dir)...")
+    cells_dir = args.cells_dir  # 默认 = 本地 cells_dir, use_lingxuan 时被覆盖
+    # 默认本地模式: 用已有 cells_dir
+    # 灵炫模式: --use-lingxuan 自动生图
+    if args.use_lingxuan:
+        from lingxuan_grid import generate_6panel_grid
+        beats_desc = [b['description'] for b in storyboard]
+        grid_dir = f"/tmp/ecom_grid_{int(__import__('time').time())}"
+        cells = generate_6panel_grid(
+            product_image=args.product_image,
+            product_text=args.product_text,
+            beats=beats_desc,
+            output_dir=grid_dir,
+        )
+        cells_dir = grid_dir  # 覆盖 args.cells_dir
+        print(f"  ✓ 自动生成 {len(cells)} 张 cell, dir={cells_dir}")
+
     print("\n[4/5] 对齐官方六段 YAML prompt...")
     prompt = build_prompt(storyboard, product_info, copy)
     print(f"  ✓ prompt 长度: {len(prompt)} chars")
 
     print("\n[5/5] 跑 ComfyUI 渲染 (FL2VA + 5 AddGuide)...")
-    output = render_fl2va_5guides(args.cells_dir, prompt, args.output)
+    output = render_fl2va_5guides(cells_dir, prompt, args.output)  # 用本地覆盖后的 cells_dir
     print(f"  ✅ 最终视频: {output}")
     print("\n" + "=" * 60)
     print(f"  完整链路跑通! 出片 {output}")
