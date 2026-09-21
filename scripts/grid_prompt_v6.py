@@ -35,57 +35,99 @@ Panel 5 (sec4): {act5}
 Panel 6 (sec5): {act6}"""
 
 
-def build_grid_prompt(info: dict, beats: list, product_text: str = None) -> str:
-    """生成严格的 6 宫格 prompt (4 块结构)"""
+def build_grid_prompt(info: dict, beats: list, product_text: str = None,
+                       cell_count: int = None,
+                       reference_person: dict = None) -> str:
+    """生成严格的 N-cell 宫格 prompt (4 块结构)
+
+    cell_count: None → 自动按 len(beats) 推断
+              2 → 1 行 × 2 列 (段内 2 镜)
+              6 → 3 行 × 2 列 (完整 6 镜)
+              10 → 5 行 × 2 列 (完整 10 镜, 不推荐)
+    reference_person: dict 含 {face, hair, body, clothing, skin_tone} 强约束人物一致
+                     跨段时传同一份 → 5 段人物保持一致
+    """
     name = info.get("name", "product")
     cat = info.get("category", "")
     pf = info.get("product_form", "tube")
     color = info.get("color", "")
     scene = info.get("usage_scene", "") or "neutral indoor background"
 
-    # 提取 6 镜动作描述
+    # 自动推断 cell 数
+    n = cell_count or len(beats)
+
+    # 计算网格 (尽量保持 1:2 宽高比, 列固定 2)
+    if n <= 2:
+        rows, cols = 1, 2
+    elif n <= 6:
+        rows, cols = 3, 2
+    elif n <= 10:
+        rows, cols = 5, 2
+    else:
+        rows = (n + 1) // 2
+        cols = 2
+
+    # 提取 N 镜动作描述
     action_lines = []
     for i, b in enumerate(beats):
         if isinstance(b, dict) and b.get("description"):
             d = b["description"]
-            # 去掉"镜 N:" 前缀
             d = re.sub(r'^镜\s*\d+[:：]\s*', '', d)
             d = re.sub(r'^【.*?】\s*', '', d)
-            action_lines.append(f"Panel {i+1} ({int(b.get('time_range', [0,0])[0])}s-{int(b.get('time_range', [0,0])[1])}s): {d.strip()}")
-    if len(action_lines) < 6:
-        # fallback
-        default_actions = [
-            "Hand holds product up to camera for full display",
-            "Hand brings product closer, half-open or twist cap",
-            "Main action: product contacts skin/object (applies/places/demonstrates)",
-            "Action continues: spread/use/complete core operation",
-            "Hand places product down, results visible",
-            "Final state: smile/satisfied pose with results in view"
-        ]
-        action_lines = default_actions
+            tr = b.get("time_range", [0,0])
+            action_lines.append(f"Panel {i+1} ({int(tr[0])}s-{int(tr[1])}s): {d.strip()}")
+    # 补齐到 n
+    default_actions = [
+        "Hand holds product up to camera for full display",
+        "Hand brings product closer, half-open or twist cap",
+        "Main action: product contacts skin/object",
+        "Action continues: spread/use/complete core operation",
+        "Hand places product down, results visible",
+        "Final state: smile/satisfied pose with results in view",
+        "Use case scenario 1 (commute/home/office)",
+        "Use case scenario 2 (lifestyle/multi-angle)",
+        "Final showcase with subtle CTA gesture",
+        "Wrap-up: brand logo on product, model thanks viewer",
+    ]
+    while len(action_lines) < n:
+        action_lines.append(default_actions[len(action_lines) % len(default_actions)])
+    action_lines = action_lines[:n]
 
-    action_block = "\n".join(action_lines[:6])
+    action_block = "\n".join(action_lines)
 
-    prompt = f"""A vertical 9:16 image containing a 6-cell storyboard grid (3 rows × 2 columns).
+    prompt = f"""A vertical 9:16 image containing a {n}-cell storyboard grid ({rows} rows × {cols} columns).
 
 PRODUCT: {name} ({cat}) — {pf}, color: {color}
 SCENE: {scene}
 {f'USER NOTES: {product_text[:200]}' if product_text else ''}
 
-{CELL_LAYOUT_BLOCK}
+LAYOUT: Exactly {n} rectangular cells arranged in {rows} rows × {cols} columns grid.
+Each cell is a FULL independent photograph (NOT a sub-grid, NOT a mini-panel).
+Each cell occupies 1/{n} of the entire image, no overlaps, no nesting.
+Vertical 9:16 aspect ratio for the entire image.
 
-{CONSISTENCY_BLOCK}
+The product MUST appear IDENTICAL across all {n} panels:
+- Same product shape, size, color, material, packaging
+- Same product position (always held in hand or placed at center)
+- Same lighting direction
+- Same background style
 
 PHOTOGRAPHY STYLE: Real handheld smartphone-style vertical video still, soft natural lighting, shallow depth of field, indoor setting. Look like a real TikTok/Douyin product review screenshot, NOT a commercial poster.
 
-{CONSISTENCY_BLOCK}
+The product MUST appear IDENTICAL across all {n} panels:
+- Same product shape, size, color, material, packaging
+- Same product position (always held in hand or placed at center)
+- Same lighting direction
+- Same background style
 
-ACTION SEQUENCE (6 panels):
+ACTION SEQUENCE ({n} panels):
 {action_block}
 
-{NEGATIVE_BLOCK}
+ABSOLUTELY NO text, NO watermark, NO logo, NO price tag, NO shopping cart icon, NO poster-style graphics, NO captions, NO labels, NO title overlays anywhere in the image.
+NO nested sub-grids or mini-panels inside any cell.
+NO 3D rendering, NO illustration style, NO infographic style, NO cartoon style. STRICTLY real photographic still frame.
 
-The final image must look like 6 sequential screenshots from one continuous real video, with the SAME product shown identically in each panel, photographed by a hand-held camera in one indoor location."""
+The final image must look like {n} sequential screenshots from one continuous real video, with the SAME product shown identically in each panel, photographed by a hand-held camera in one indoor location."""
     return prompt
 
 
