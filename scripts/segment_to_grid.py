@@ -41,9 +41,13 @@ def slice_10_to_5(beats: list) -> list:
 
 def build_segment_grid_prompt(segment: dict, info: dict, copy: dict,
                                 product_text: str = "") -> str:
-    """为单段生成 2-cell 宫格图 prompt (1 行 × 2 列)"""
+    """为单段生成 6-cell 宫格图 prompt (3 行 × 2 列)
+
+    修复: 段内 6 cell, 每 cell 对应 1 个分镜动作
+    cell_count=6 替代 2 (避免拉伸)
+    """
     beats = segment["beats"]
-    return build_grid_prompt(info, beats, product_text, cell_count=len(beats))
+    return build_grid_prompt(info, beats, product_text, cell_count=6)
 
 
 def _b64(p):
@@ -125,11 +129,28 @@ def render_5_segments(image_path: str, product_text: str, output_dir: str,
     # 3. 分镜 (10 镜分 5 段)
     print(f"[3/3] 分镜 (10 镜分 5 段)...", flush=True)
     beats = build_storyboard_v2(info, copy)
-    if not beats or len(beats) < 10:
-        print(f"  ! LLM 输出 {len(beats)} 镜, fallback 补齐", flush=True)
+    # 只在 LLM 完全失败 (返回 fallback 占位) 时才覆盖
+    if not beats or (beats and isinstance(beats[0], dict) and beats[0].get("_model") == "fallback"):
+        print(f"  ! LLM 输出 fallback, 用规则版替代", flush=True)
         beats = _fallback_storyboard(info)
+    elif len(beats) < 10:
+        # LLM 返回了真实分镜但 < 10 镜 (例如 6 镜), 用 fallback 补齐到 10
+        from segment_to_grid import slice_10_to_5 as _slice
+        from llm_modules import _fallback_storyboard as _fb
+        print(f"  ! LLM 输出 {len(beats)} 镜, 用 fallback 补齐到 10 镜", flush=True)
+        fallback_beats = _fb(info)
+        # 用 LLM 的 6 镜 + fallback 的镜 7-10
+        beats = beats + fallback_beats[len(beats):]
+        # 重新统一 segment 字段
+        for i, b in enumerate(beats):
+            b["segment"] = (i // 2) + 1
+            b["beat_id"] = i + 1
+            # 时段内 4s
+            seg_idx = i // 2
+            mir_idx = i % 2
+            b["time_range"] = [float(seg_idx * 8 + mir_idx * 4), float(seg_idx * 8 + (mir_idx + 1) * 4)]
     segments = slice_10_to_5(beats)
-    print(f"  → 模型: {beats[0].get('_model')}", flush=True)
+    print(f"  → 模型: {beats[0].get('_model')}, 共 {len(beats)} 镜", flush=True)
 
     # 4. 生成 5 张宫格图 (每段 1 张, 用 image-to-image)
     print(f"[4/4] 生成 5 张宫格图 (image-to-image, 锁定人物)...", flush=True)

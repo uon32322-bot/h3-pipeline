@@ -101,9 +101,13 @@ def build_grid_prompt(product_text: str, beats: List[str]) -> str:
     """
     beats_str = "\n".join([f"  Panel {i+1}: {b}" for i, b in enumerate(beats)])
 
-    prompt = f"""A 6-panel grid (3 columns × 2 rows) showing the sequential use of the product in a single continuous scene.
+    # 关键: 强调产品外观, 避免灵炫幻觉化包装颜色
+    prompt = f"""A 6-panel grid (3 columns × 2 rows) showing the sequential use of the EXACT product in a single continuous scene.
 
-Product: {product_text}
+CRITICAL PRODUCT DESCRIPTION (preserve exactly):
+{product_text}
+
+The product must appear in EXACTLY the color, packaging type, and label shown in the reference image. Do NOT change the product color, packaging style, or add any labels/text that is not in the reference. If the reference shows a white bottle, the bottle must stay white. If the reference shows a gold tube, the tube must stay gold.
 
 Read panels LEFT-TO-RIGHT, TOP-TO-BOTTOM (sequence 1→2→3, then 4→5→6).
 
@@ -112,14 +116,14 @@ Each panel shows a different moment in time:
 {beats_str}
 
 Requirements:
-- All 6 panels must show the SAME person demonstrating the SAME product (if there is a person)
-- If no person, all 6 panels show the same product from different angles/moments
+- All 6 panels must show the SAME person (same face, same clothing) demonstrating the SAME product
+- The product must look identical across all 6 panels (no color change, no shape change)
 - Each panel is a different moment in time (chronological sequence)
 - Real photo style, NOT illustration, NOT cartoon, NOT anime
 - Warm natural lighting, soft shadows, no harsh contrast
 - Clean composition, the subject and product clearly visible in each panel
 - NO text overlay, NO watermark, NO logo in any panel
-- Horizontal 3:2 aspect ratio (1536×1024) suitable for 6-panel grid
+- Vertical 9:16 aspect ratio (768×1344) suitable for short video
 
 The 6-panel sequence tells a complete story of using this product from start to finish."""
     return prompt
@@ -206,10 +210,18 @@ def slice_grid_to_cells(grid_path: str, output_dir: str, cols: int = 3, rows: in
 
 
 def generate_6panel_grid(product_image: str, product_text: str,
-                          beats: List[str], output_dir: str) -> List[str]:
-    """一键: 灵炫出 6 宫格图 + 切片成 cell1-6.png"""
+                          beats: List[str], output_dir: str,
+                          ref_image: str = None,
+                          size: str = "720x1280") -> List[str]:
+    """
+    一键: 灵炫出 6 宫格图 + 切片成 cell1-6.png
+    size: 默认 720x1280 (9:16 竖版) — cell 比例 ≈ 2:3, 接近画布比例, 减少变形
+    ref_image: 参考图 (默认 = product_image, 用 K5 grid 作 ref 时可锁定模特)
+    """
+    if ref_image is None:
+        ref_image = product_image
     prompt = build_grid_prompt(product_text, beats)
-    grid_path = call_lingxuan(prompt, product_image)
+    grid_path = call_lingxuan(prompt, ref_image, size=size)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     import shutil
     target_grid = f"{output_dir}/grid.png"
