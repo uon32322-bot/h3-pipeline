@@ -10,7 +10,9 @@ H3 AddGuide 5 个中间锚 (frame_idx: 24/72/120/144/168)
   2. ✅ 5 AddGuide 中间锚 (替代 1 个) 让动作更细腻
   3. ✅ 段间动作细化, 每段 1 个核心动作
 """
-import json, os
+import json
+import os
+from typing import Optional
 
 H3P = "/root/autodl-tmp/h3p"
 
@@ -60,16 +62,27 @@ N/A"""
 
 def build_segment_workflow_6cell(segment_idx: int, product_id: str = "shoes",
                                     product_name: str = "running_shoes",
-                                    product_info: dict = None):
+                                    product_info: Optional[dict] = None,
+                                    cell_paths: Optional[list] = None):
     """构建单段 H3 workflow (6 cell 宫格图 + 5 AddGuide)
 
     关键改进:
       - 6 cell (3 行 × 2 列) 替代 2 cell, 避免拉伸
       - 5 AddGuide 中间锚 (frame_idx 24/72/120/144/168) 替代 1 个
       - 每段 8s = 192 帧
+      - **P2 修复**: 接受 cell_paths 参数, 不再硬编码 seg{N}_cell1.png
+        - 如果传 cell_paths (推荐): 严格使用传入路径, 不读 input/ 根目录
+        - 如果不传: 退回旧行为 seg{N}_cell{1-6}.png (仅向后兼容)
     """
     seg_name = f"seg{segment_idx}"
-    prompt = build_segment_prompt(segment_idx, product_info)
+
+    # P2: 优先用传入的 cell_paths, 否则 fallback 到旧硬编码
+    if cell_paths and len(cell_paths) == 6:
+        cell_filenames = [os.path.basename(p) for p in cell_paths]
+    else:
+        # 向后兼容 (旧硬编码)
+        cell_filenames = [f"{seg_name}_cell{i}.png" for i in range(1, 7)]
+    prompt = build_segment_prompt(segment_idx, product_info or {})
 
     # 段间 seed 变化, 让 5 段视频不重复
     seed = 42000 + segment_idx * 100
@@ -85,12 +98,12 @@ def build_segment_workflow_6cell(segment_idx: int, product_id: str = "shoes",
         # 分辨率 9:16
         "6": {"class_type": "ResolutionSelector", "inputs": {"resolution": "9:16 (Portrait Widescreen)"}},
         # 加载 6 cell 宫格图
-        "8":  {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell1.png"}},  # 首帧 (锚)
-        "20": {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell2.png"}},
-        "22": {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell3.png"}},
-        "24": {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell4.png"}},
-        "26": {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell5.png"}},
-        "28": {"class_type": "LoadImage", "inputs": {"image": f"{seg_name}_cell6.png"}},  # 尾帧 (锚)
+        "8":  {"class_type": "LoadImage", "inputs": {"image": cell_filenames[0]}},  # 首帧 (锚)
+        "20": {"class_type": "LoadImage", "inputs": {"image": cell_filenames[1]}},
+        "22": {"class_type": "LoadImage", "inputs": {"image": cell_filenames[2]}},
+        "24": {"class_type": "LoadImage", "inputs": {"image": cell_filenames[3]}},
+        "26": {"class_type": "LoadImage", "inputs": {"image": cell_filenames[4]}},
+        "28": {"class_type": "LoadImage", "inputs": {"image": cell_filenames[5]}},  # 尾帧 (锚)
         # H3 Image-to-Video (首帧 cell1 + 尾帧 cell6)
         "7": {"class_type": "MiniMaxH3ImageToVideo", "inputs": {
             "clip": ["2", 0], "vae": ["3", 0],
