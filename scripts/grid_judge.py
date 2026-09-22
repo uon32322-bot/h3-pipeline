@@ -99,7 +99,13 @@ def judge_and_retry(image_path: str, regenerate_fn, product_name: str,
 
     regenerate_fn(): 调用 i2i 生成函数 (无参)
     """
+    import os as _os_judge
     history = []
+    # 第 1 次评审前先生成图 (如果不存在)
+    if not _os_judge.path.exists(image_path):
+        print(f"  [判官] 第 1 次先生成图...", flush=True)
+        regenerate_fn()
+        time.sleep(2)  # 等文件写入
     for attempt in range(1, max_retries + 1):
         print(f"  [判官] 第 {attempt}/{max_retries} 次评审...", flush=True)
         verdict = judge_grid(image_path, product_name, product_form)
