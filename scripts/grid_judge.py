@@ -80,15 +80,39 @@ def judge_grid(image_path: str, product_name: str, product_form: str) -> dict:
         with urllib.request.urlopen(req, timeout=120) as r:
             resp = json.loads(r.read().decode())
         raw = resp["choices"][0]["message"]["content"]
-
-        # 容错解析 (有 markdown 包装)
         raw_clean = raw.strip()
+
+        # 容错 1: 去掉 markdown 包装
         if raw_clean.startswith("```"):
             raw_clean = raw_clean.split("```", 2)[1]
             if raw_clean.startswith("json"):
                 raw_clean = raw_clean[4:]
             raw_clean = raw_clean.strip().rstrip("`")
-        return json.loads(raw_clean)
+
+        # 容错 2: 直接 parse
+        try:
+            return json.loads(raw_clean)
+        except json.JSONDecodeError:
+            pass
+
+        # 容错 3 (新): 用正则提取 score/ok (VLM 输出截断时)
+        import re
+        score_match = re.search(r'"score"\s*:\s*(\d+)', raw)
+        ok_match = re.search(r'"ok"\s*:\s*(true|false)', raw, re.IGNORECASE)
+        issues_match = re.search(r'"issues"\s*:\s*\[([^\]]*)\]', raw)
+
+        if score_match and ok_match:
+            score = int(score_match.group(1))
+            ok = ok_match.group(1).lower() == "true"
+            issues = []
+            if issues_match:
+                issues_raw = issues_match.group(1)
+                issues = [s.strip().strip('"').strip("'") for s in issues_raw.split(",") if s.strip()]
+            print(f"  [判官降级] VLM JSON 截断, 用正则提取: score={score}, ok={ok}", flush=True)
+            return {"ok": ok, "score": score, "issues": issues, "raw": raw[:200]}
+
+        # 完全无法解析
+        return {"ok": False, "issues": [f"VLM 输出无法解析"], "score": 0, "raw": raw[:500]}
     except Exception as e:
         return {"ok": False, "issues": [f"VLM 评审失败: {e}"], "score": 0, "raw": str(e)}
 
