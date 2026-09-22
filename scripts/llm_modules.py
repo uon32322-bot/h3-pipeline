@@ -539,6 +539,152 @@ def _fallback_storyboard(info: dict) -> list:
 
 
 # ============ 任务 4: 宫格图 prompt 构建 (v6) ============
+
+
+# ============ 任务 3b: 5 段 × 1 镜 v3 (一段一卖点) ============
+
+def build_storyboard_v3(product_info: dict, copy: dict) -> list:
+    """5 段 × 1 镜 (每段 8s, 每段只表达 1 个核心主题)
+
+    段 1: 钩子+痛点 (8s)
+    段 2: SP1 (8s)
+    段 3: SP2 (8s)
+    段 4: SP3 (8s)
+    段 5: 三色/多色 + CTA (8s)
+
+    段内 6 cell 由 build_segment_grid_prompt 程序展开
+    """
+    cat = product_info.get("category", "")
+    name = product_info.get("name", "")
+    pf = product_info.get("product_form", "")
+    color = product_info.get("color", "")
+    tagline = copy.get("tagline", "") if isinstance(copy, dict) else ""
+    sp = (copy.get("selling_points", ["卖点"]) if isinstance(copy, dict) else ["卖点"])[:3]
+
+    sys_p = """你是带货视频分镜师。只输出严格 JSON 数组, 正好 5 个对象, 不要 markdown 包装。
+
+**架构**: 5 段 × 1 镜 (每镜 8s, 总 40s), 段内 6 cell 由程序自动展开
+- 段 1 (0-8s): 钩子+痛点 (1 个分镜对象)
+- 段 2 (8-16s): SP1 演示 (1 个分镜对象, 6 cell 围绕 SP1 展开)
+- 段 3 (16-24s): SP2 演示 (1 个分镜对象, 6 cell 围绕 SP2 展开)
+- 段 4 (24-32s): SP3 演示 (1 个分镜对象, 6 cell 围绕 SP3 展开)
+- 段 5 (32-40s): 三色 + CTA (1 个分镜对象, 6 cell 围绕色彩+行动展开)
+
+**字段**:
+- segment: 1-5
+- time_range: [起始s, 结束s] (8 秒一段)
+- description: 一句话描述本段 8s 内 6 cell 围绕的共同主题
+- keyframe: 第 1 cell 的具体画面 (开头 0-1.3s)
+- lastframe: 第 6 cell 的具体画面 (结尾 6.7-8.0s)
+
+每段 description 必须是 1 个完整连贯场景描述 (不是 6 个动作列表)。
+
+**8 维度**:
+- subject: 椭圆脸/单眼皮/小尖鼻
+- product_form: 物理形态先于颜色
+- hand_action: 拇指+食指捏住 / 掌心托住
+- purpose: 动作目的
+- quantity: only ONE product visible
+- negation: NOT 口红 / NOT 香水
+- camera: close-up / macro
+- time_text: Between 0.000s and 8.000s"""
+
+    user_p = f"""产品:{name} ({cat})
+物理形态:{pf}
+颜色:{color}
+钩子(段1): {tagline}
+SP1 (段2): {sp[0] if len(sp) > 0 else ''}
+SP2 (段3): {sp[1] if len(sp) > 1 else ''}
+SP3 (段4): {sp[2] if len(sp) > 2 else ''}
+
+请输出正好 5 个 JSON 对象的数组, time_range 严格用:
+段1: [0.0, 8.0]
+段2: [8.0, 16.0]
+段3: [16.0, 24.0]
+段4: [24.0, 32.0]
+段5: [32.0, 40.0]"""
+
+    last_err = None
+    for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
+        try:
+            raw = call_lk888(
+                m,
+                [{"role": "system", "content": sys_p},
+                 {"role": "user", "content": user_p}],
+                temperature=0.6, max_tokens=3000, timeout=120,
+            )
+            beats = parse_json_strict(raw)
+            if isinstance(beats, list):
+                if len(beats) != 5:
+                    last_err = f"{m}: returned {len(beats)} beats, expected 5"
+                    continue
+                for i, b in enumerate(beats, 1):
+                    if "segment" not in b:
+                        b["segment"] = i
+                    b["beat_id"] = i
+                    if "time_range" not in b:
+                        b["time_range"] = [float((i-1)*8), float(i*8)]
+                    if not isinstance(b.get("description"), str) or len(b["description"]) < 5:
+                        b["description"] = f"段{i}: (内容缺失)"
+                    b["_model"] = m
+                return beats
+            last_err = f"{m}: parse_json returned non-list"
+        except Exception as e:
+            last_err = f"{m}: {e}"
+            continue
+    return _fallback_storyboard_v3(product_info)
+
+
+def _fallback_storyboard_v3(info: dict) -> list:
+    """规则版 5 段 × 1 镜 (每段 8s, 一段一卖点)"""
+    cat = info.get("category", "其他")
+    name = info.get("name", "产品")
+    sp = info.get("selling_points", ["卖点1", "卖点2", "卖点3"])
+    if isinstance(sp, str):
+        sp = [s.strip() for s in sp.split("|") if s.strip()][:3]
+    if not sp or len(sp) < 3:
+        sp = ["卖点1", "卖点2", "卖点3"]
+
+    # 通用 5 段模板 (不依赖品类)
+    seg1_desc = f"用户场景痛点展示, 对比传统不便与新产品优势, 引出 {name} 解决方案。"
+    seg1_kf = f"人物疲惫使用旧方式 (没有 {name}), 镜头捕捉困扰表情。"
+    seg1_lf = f"人物眼睛发亮, 拿起 {name} 准备展示。"
+
+    seg2_desc = f"演示 {sp[0]} (段 2 单一卖点, 6 cell 围绕此卖点展开)。"
+    seg2_kf = f"{name} 静置就位, 准备演示 {sp[0]}。"
+    seg2_lf = f"{sp[0]} 演示效果清晰可见, {name} 在镜头前展示卖点。"
+
+    seg3_desc = f"演示 {sp[1]} (段 3 单一卖点, 6 cell 围绕此卖点展开)。"
+    seg3_kf = f"{name} 重新就位, 准备演示 {sp[1]}。"
+    seg3_lf = f"{sp[1]} 演示效果清晰可见, {name} 在镜头前展示卖点。"
+
+    seg4_desc = f"演示 {sp[2]} (段 4 单一卖点, 6 cell 围绕此卖点展开)。"
+    seg4_kf = f"{name} 重新就位, 准备演示 {sp[2]}。"
+    seg4_lf = f"{sp[2]} 演示效果清晰可见, {name} 在镜头前展示卖点。"
+
+    seg5_desc = f"展示 {name} 多色/多款 + CTA 行动呼吁。"
+    seg5_kf = f"{name} 多色款静置陈列展示。"
+    seg5_lf = f"主播手举 {name} 主推款, 热情指向镜头发出购买号召。"
+
+    beats = []
+    for i, (desc, kf, lf) in enumerate([
+        (seg1_desc, seg1_kf, seg1_lf),
+        (seg2_desc, seg2_kf, seg2_lf),
+        (seg3_desc, seg3_kf, seg3_lf),
+        (seg4_desc, seg4_kf, seg4_lf),
+        (seg5_desc, seg5_kf, seg5_lf),
+    ], start=1):
+        beats.append({
+            "beat_id": i,
+            "segment": i,
+            "time_range": [float((i-1)*8), float(i*8)],
+            "description": desc,
+            "keyframe": kf,
+            "lastframe": lf,
+            "_model": "fallback",
+        })
+    return beats
+
 def build_grid_prompt_v6(info: dict, beats: list, product_text: str = "") -> str:
     """调 grid_prompt_v6 模块"""
     from grid_prompt_v6 import build_grid_prompt

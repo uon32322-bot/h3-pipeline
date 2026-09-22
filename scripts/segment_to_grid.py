@@ -1,3 +1,5 @@
+import json
+import time
 #!/usr/bin/env python3
 """5 段端到端: 把 10 镜分镜 → 5 张独立 2-cell 宫格图 (用 image-to-image 锁定人物产品)
 
@@ -178,3 +180,93 @@ def render_5_segments(image_path: str, product_text: str, output_dir: str,
         json.dump(result, f, ensure_ascii=False, indent=2)
     print(f"\n总耗时: {time.time()-start:.1f}s, 保存 {json_path}", flush=True)
     return result
+
+# === v3: 5 段 × 1 镜 (一段一卖点) ===
+
+def slice_5_to_5(beats: list) -> list:
+    """5 镜 (v3) → 5 段 (每段 1 镜, 直接对应)"""
+    if len(beats) != 5:
+        # 容错
+        try:
+            from llm_modules import _fallback_storyboard_v3
+            beats = _fallback_storyboard_v3({"category": "其他", "name": "产品", "selling_points": ["卖点1","卖点2","卖点3"]})
+        except Exception:
+            beats = []
+    if not beats:
+        beats = [{
+            "beat_id": i+1, "segment": i+1,
+            "time_range": [float(i*8), float((i+1)*8)],
+            "description": f"段{i+1} 默认内容", "keyframe": "", "lastframe": "",
+            "_model": "fallback",
+        } for i in range(5)]
+    segments = []
+    for seg_idx, b in enumerate(beats):
+        segments.append({
+            "segment": seg_idx + 1,
+            "time_range": b.get("time_range", [float(seg_idx*8), float((seg_idx+1)*8)]),
+            "beats": [b],
+            "keyframe": b.get("keyframe", ""),
+            "lastframe": b.get("lastframe", ""),
+        })
+    return segments
+
+
+def render_5_segments_v3(image_path: str, product_text: str, output_dir: str,
+                          reference_person_path: str,
+                          product_id: str = "shoe") -> dict:
+    """5 段端到端 (v3: 5 段 × 1 镜 + 6 cell 宫格)"""
+    os.makedirs(output_dir, exist_ok=True)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from llm_modules import (
+        recognize_product, build_copy_v2, build_storyboard_v3,
+        _fallback_storyboard_v3
+    )
+
+    start = time.time()
+    print(f"[1/3] 产品识别...", flush=True)
+    info = recognize_product(image_path, product_text)
+    print(f"  → {info.get('_model')}: {info.get('category')}, 形态: {info.get('shape','')[:60]}", flush=True)
+
+    print(f"[2/3] 文案生成...", flush=True)
+    copy = build_copy_v2(info, product_text)
+    print(f"  → {copy.get('_model')}: {copy.get('tagline','')[:80]}", flush=True)
+
+    print(f"[3/3] 分镜 (5 段 × 1 镜, v3)...", flush=True)
+    beats = build_storyboard_v3(info, copy)
+    if not beats or (beats and isinstance(beats[0], dict) and beats[0].get("_model") == "fallback"):
+        print(f"  ! LLM 输出 fallback, 用规则版替代", flush=True)
+        beats = _fallback_storyboard_v3(info)
+    segments = slice_5_to_5(beats)
+    print(f"  → 模型: {beats[0].get('_model')}, 共 {len(beats)} 镜 (5 段 × 1 镜)", flush=True)
+
+    print(f"[4/4] 生成 5 张宫格图 (image-to-image, 锁定人物)...", flush=True)
+    grids = []
+    for seg in segments:
+        seg_num = seg["segment"]
+        prompt = build_segment_grid_prompt(seg, info, copy, product_text)
+        out_path = f"{output_dir}/seg{seg_num}_grid.png"
+        print(f"  段{seg_num} prompt {len(prompt)}字 生成中...", flush=True)
+        res = generate_grid_i2i(prompt, reference_person_path, out_path)
+        print(f"    → {res}", flush=True)
+        grids.append({"segment": seg_num, "path": out_path, "result": res})
+
+    result = {
+        "recognition": info,
+        "copy": copy,
+        "storyboard": beats,
+        "segments": segments,
+        "grids": grids,
+        "elapsed_sec": int(time.time() - start),
+    }
+    with open(f"{output_dir}/result.json", "w") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+    print(f"\n=== 完成 ===\n耗时: {result['elapsed_sec']}s\n结果: {output_dir}/result.json", flush=True)
+    return result
+
+
+# === 6 cell prompt 生成 (从 grid_prompt_v6 import build_grid_prompt) ===
+
+try:
+    from grid_prompt_v6 import build_grid_prompt
+except ImportError:
+    build_grid_prompt = None
