@@ -18,43 +18,214 @@ H3P = "/root/autodl-tmp/h3p"
 
 
 # === 通用 prompt (适合所有 5 段, 段间差异由 cell 内容决定) ===
-def build_segment_prompt(seg_idx: int, product_info: dict = None) -> str:
-    """生成单段 H3 prompt (6 cell 宫格图配套, 含主体锁定)"""
+def build_segment_prompt(seg_idx: int, product_info: dict = None,
+                          segment_desc: str = "",
+                          cell_actions: list = None,
+                          voiceover_text: str = "",
+                          model_gender: str = "neutral",
+                          voiceover_full: dict = None) -> str:
+    """生成单段 H3 prompt (对齐官方 H3 skill 9 条硬约束 + 崩坏缓解)
+
+    关键修复 (2026-09-23, 修复"画面不连贯 + 产品不一致 + 配音不自然 + 男模特女声"):
+      - 接受 cell_actions (6 cell 显式动作描述, 来自宫格图元数据)
+      - 接受 voiceover_text (本段台词, H3 模型自动合成中文语音)
+      - 接受 model_gender ("female"/"male"/"neutral") 决定 H3 原生音色
+      - Subject 2 包含 info.shape + color 完整形态 (修复"产品不一致")
+      - detailed_description 用 6 cell 显式动作序列 (修复"动作不连贯/凭空出现")
+      - overall_soundscape 按性别描述音色 (修复"男模特+女声")
+
+    根据 product_info 动态生成主体描述:
+    - 人物: 通用模型描述 (男女通用, 不锁脸/性别, 让 H3 first_frame 决定)
+    - 产品: 从 product_info.shape (详细形态) + color + product_form 完整拼写
+
+    9 条硬约束 (来自 h3-fl2va-addguide-fine-grain-storyboard skill):
+      1. 时长严格 (8s = 192 帧)
+      2. 单镜单动作 (每段 1 个核心动作)
+      3. 禁时序跳变词 (不用"随后/接着/然后")
+      4. 手部细到指节 (拇指/食指/掌心)
+      5. 物理形态先于颜色 + negation (NOT other category)
+      6. 镜1镜6镜像 (开头结尾同一构图)
+      7. 中间2镜核心动作 (climax 是镜头重点)
+      8. 产品前3秒入画 (镜1 必须有产品)
+      9. only ONE product (不出现第二个)
+
+    Args:
+        seg_idx: 段号 (1-5)
+        product_info: 包含 product_form/color/name/category/selling_points/shape
+        segment_desc: 本段文案描述 (从 storyboard 取)
+        cell_actions: 6 个 cell 的显式动作描述 (从宫格图 cell 1-6 提取)
+                      每个 cell 一个短句, 描述具体动作 + 接触点 + 视觉反馈
+        voiceover_text: 本段中文台词 (H3 模型自动合成语音 + 同步口型)
+        model_gender: 模特性别 ("female"/"male"/"neutral"), 决定 TTS 音色
+    """
+    # 解析产品信息
+    name = (product_info or {}).get("name", "产品")
+    pf = (product_info or {}).get("product_form", "")  # 物理形态简称 (bottle/jar/tube)
+    color = (product_info or {}).get("color", "")
+    shape = (product_info or {}).get("shape", "")  # 详细形态描述 (修复产品一致性)
+    sp_list = (product_info or {}).get("selling_points", [])
+    if isinstance(sp_list, str):
+        sp_list = [s.strip() for s in sp_list.split("|") if s.strip()][:3]
+    if not sp_list:
+        sp_list = ["核心卖点"]
+    sp_str = ", ".join(sp_list[:3])
+
+    # 主体 1 描述 (人物, 通用, 让 H3 first_frame 决定外貌)
+    subject1 = "<Subject 1> is the model from <Picture 1> (the reference image). Preserve the model's facial identity, hairstyle, body proportions, and outfit exactly across the entire clip."
+
+    # 主体 2 描述 (产品, 动态) — 修复"产品不一致"
+    # **关键**: 用 info.shape 完整形态描述 + color + product_form, 让 H3 看到 Picture 1 里的精确产品
+    shape_detail = shape if shape else (pf or name)
+    subject2 = (
+        f"<Subject 2> is the EXACT {name} from <Picture 1>.\n"
+        f"Physical form: {shape_detail}\n"
+        f"Color: {color or 'as shown in Picture 1'}\n"
+        f"A single {name} only, never two, never three, never a reflection, never a duplicate, never a similar-looking different product. "
+        f"Preserve the EXACT product shape, color, material, and details from <Picture 1> throughout the entire clip. "
+        f"The product is {name}, NOT any other category (NOT lipstick, NOT perfume, NOT cup, NOT bottle of different brand)."
+    )
+
+    # 段主题 (用 LLM 输出的 segment_desc, 避免硬编码)
+    seg_theme = segment_desc if segment_desc else f"段 {seg_idx} 演示 {name} 的核心卖点 ({sp_str})"
+
+    # === 6 cell 显式动作序列 (修复"动作不连贯") ===
+    # 如果传了 cell_actions (从宫格图元数据提取), 用它; 否则用默认占位
+    if cell_actions and len(cell_actions) >= 6:
+        cells_block = "\n".join([
+            f"[Cell {i+1} — {'SETUP' if i == 0 else 'TRIGGER' if i == 1 else 'BUILDUP' if i == 2 else 'CLIMAX' if i == 3 else 'DECAY' if i == 4 else 'RESULT'}]: {cell_actions[i].strip()}"
+            for i in range(6)
+        ])
+    else:
+        # fallback: 抽象描述 (老逻辑, 已知会导致动作不连贯)
+        cells_block = f"""[Cell 1 — SETUP]: <Subject 1> holds the {name} in display position.
+[Cell 2 — TRIGGER]: <Subject 1> begins the demonstration of {seg_theme}.
+[Cell 3 — BUILDUP]: <Subject 1> deepens the demonstration.
+[Cell 4 — CLIMAX]: The product's {sp_list[0] if sp_list else 'core selling point'} is fully visible.
+[Cell 5 — DECAY]: <Subject 1> returns to neutral pose.
+[Cell 6 — RESULT]: <Subject 1> holds the {name} in closing confirmation pose."""
+
+    # === 音轨 prompt (修复"配音不自然"——用 H3 原生 TTS + 适配模特性别) ===
+    gender_word = {
+        "female": "young Chinese woman (mid-20s, friendly and slightly upbeat, pitch around 180-220 Hz, warm timbre, conversational pace)",
+        "male":   "young Chinese man (mid-20s, friendly and slightly upbeat, pitch around 110-140 Hz, warm timbre, conversational pace)",
+        "neutral": "young Chinese adult speaker (mid-20s, friendly and slightly upbeat, pitch around 150-180 Hz, warm timbre, conversational pace)",
+    }.get(model_gender, "young Chinese adult speaker (mid-20s, friendly and slightly upbeat, pitch around 150-180 Hz, warm timbre, conversational pace)")
+
+    voice_pitch_desc = {
+        "female": "a warm female voice with natural feminine pitch",
+        "male":   "a warm male voice with natural masculine pitch",
+        "neutral": "a clear, gender-appropriate voice matching the model's appearance",
+    }.get(model_gender, "a clear voice")
+
+    pronoun = "Her voice" if model_gender == "female" else "His voice" if model_gender == "male" else "The voice"
+
+    if voiceover_text:
+        # H3 模型自动合成中文 + 同步口型 (按性别决定音色 + ClipForge [pause] 强制停顿)
+        # 加 [pause 0.4s] 让 H3 在句中停顿, 模仿带货主播节奏感
+        # 自动在标点处加 pause (借鉴 ClipForge)
+        pause_augmented = (
+            voiceover_text
+            .replace("。", ". [pause 0.3s]")
+            .replace("，", ", [pause 0.2s]")
+            .replace("! ", "! [pause 0.4s] ")
+            .replace("? ", "? [pause 0.4s] ")
+            .replace("！", "! [pause 0.4s]")
+            .replace("？", "? [pause 0.4s]")
+            .replace("、", ", [pause 0.15s]")
+        )
+
+        # 2026-09-23 修复: 用 voiceover_full 注入 emotion + audio_directive,
+        # 让 H3 模型按节拍控制语气 (excited/pain_point/urgent 等)
+        emotion_block = ""
+        if voiceover_full:
+            emotion = voiceover_full.get("emotion", "")
+            pacing = voiceover_full.get("pacing", "")
+            volume = voiceover_full.get("volume", "")
+            audio_dir = voiceover_full.get("audio_directive", "")
+            if emotion or audio_dir:
+                emotion_block = (
+                    f"\n<Subject 1> delivers this voiceover with this specific delivery: "
+                    f"emotion={emotion or 'neutral'}, pacing={pacing or 'medium'}, "
+                    f"volume={volume or 'medium'}. {audio_dir}. "
+                )
+
+        soundscape_block = (
+            f"<Subject 1> speaks as a {gender_word}. "
+            f"She/he delivers this voiceover in clear, fluent Mandarin Chinese with lip movements perfectly synced to the speech, with natural pauses between phrases: \"{pause_augmented}\".{emotion_block}"
+            f"The Chinese speech is the dominant audio. No background music, no ambient noise. "
+            f"The voice must match <Subject 1>'s gender as shown in <Picture 1>: {voice_pitch_desc}."
+        )
+    else:
+        soundscape_block = (
+            f"<Subject 1> speaks as a {gender_word} in clear Mandarin Chinese. "
+            f"{pronoun} is the dominant audio. No background music, no ambient noise."
+        )
+
+    # === SLCT Visual Bible (借鉴 Creatify SLCT 框架 + xixihhhh/clipforge 跨段一致性) ===
+    # 跨段只允许变 "Action", 其他字段保持恒定, 让产品/人物/光照/技术参数在 5 段一致
+    visual_bible = (
+        f"\n[VISUAL BIBLE — CONSTANT ACROSS ALL 5 SEGMENTS, DO NOT CHANGE]:\n"
+        f"- Subject (Product): {name}, {shape_detail}, color {color or 'as in Picture 1'}, product_form={pf}\n"
+        f"- Lighting: soft natural indoor light, even illumination, no harsh shadows\n"
+        f"- Camera style: handheld smartphone UGC style, close-up / macro framing\n"
+        f"- Technical: 9:16 vertical format, realistic photography (NOT 3D/CGI/illustration)\n"
+        f"- Setting: clean indoor location matching <Picture 1>\n"
+        f"- Model appearance: <Subject 1> from <Picture 1> (face, hair, body, outfit stay IDENTICAL across all 6 panels and across the entire 8-second clip)\n"
+        f"Only ACTION, camera angle, and emotion change between segments. All other visual parameters stay locked.\n"
+    )
+
     return f"""subject_definitions:
-<Subject 1> is the fictional young Asian male model from <Picture 1> (the reference image), round face, single-eyelid almond eyes, small pointed nose, short black hair, athletic build, wearing a white crew-neck T-shirt and dark shorts. Preserve his facial identity, hairstyle, body proportions, and outfit exactly across the entire clip.
-<Subject 2> is the men's lightweight breathable running shoe from <Picture 1>, a single pair of grey-blue feather-knit mesh running shoes with white EVA midsole and black rubber outsole. Preserve the exact product shape, color, and details. Only ONE pair ever appears; no second pair, no reflection, no extra product.
+{subject1}
+{subject2}
+{visual_bible}
 
 summary:
-[keyframe completion] Segment {seg_idx}/5 of 5-segment 40-second video. The target video shows <Subject 1> demonstrating <Subject 2> (the running shoes) in a continuous 8-second one-take shot. The video begins with a product display pose, transitions through the key feature demonstration, and ends with a confirmation pose mirroring the start.
+[keyframe completion] Segment {seg_idx}/5 of 5-segment 40-second video. The target video shows <Subject 1> demonstrating <Subject 2> ({name}) in a continuous 8-second one-take shot. The video begins with a product display pose (镜1 = SETUP), transitions through the key feature demonstration (镜2-5 = TRIGGER→BUILDUP→CLIMAX→DECAY), and ends with a closing confirmation pose mirroring the opening (镜6 = RESULT mirror of 镜1). This segment's theme: {seg_theme}.
 
 retention_analysis:
-<Subject 1> (appears in the entire clip): fully_preserved - retain his facial identity (round face, single-eyelid almond eyes, small pointed nose), short black hair, athletic build, white crew-neck T-shirt, dark shorts throughout. Skin texture has natural pores, no plastic-looking, no airbrushed effect.
-<Subject 2> (appears in all 6 panels of <Picture 1>): fully_preserved - retain the exact grey-blue feather-knit mesh upper, white EVA midsole, black rubber outsole. The product is a running shoe, NOT a sneaker, NOT a slipper, NOT a boot. Never morphs, never duplicates, never shows mirror reflection.
-<Picture 1> (scene anchor): fully_preserved - modern living room background, soft natural light.
+<Subject 1> (appears in the entire clip): fully_preserved - retain facial identity, hairstyle, body proportions, outfit throughout. Skin texture has natural pores, no plastic-looking, no airbrushed effect. Hand details: 拇指+食指捏持 / 掌心托住 / 虎口卡住, NOT blurry hands, NOT missing fingers, NOT extra fingers.
+<Subject 2> (appears in all 6 panels of <Picture 1>): fully_preserved - retain the EXACT product shape, color, material, and details from <Picture 1>. Physical form: {shape_detail}. Color: {color}. The product is {name}, NOT any other category, NOT a different brand. Never morphs, never duplicates, never shows mirror reflection. Product is visible in frame within first 3 seconds (镜1 must contain product).
+<Picture 1> (scene anchor): fully_preserved - background and lighting consistent throughout.
 
 detailed_description:
-Live-action authentic TikTok/Douyin UGC style with realistic skin texture, smartphone camera, stable tripod-steady framing, no camera shake, realistic shadows, no plastic-looking skin, no airbrushed effect, no makeup overlay, no color grading. One continuous shot, no cuts.
+Live-action authentic TikTok/Douyin UGC style with realistic skin texture, smartphone camera, stable tripod-steady framing, no camera shake, realistic shadows, no plastic-looking skin, no airbrushed effect, no makeup overlay, no color grading. One continuous shot, no cuts, no time jumps, no sequence jumps. 8 seconds exact duration.
 
-[Shot 1] At 00:00.000, a chest-up medium close-up opens on <Subject 1> standing in a modern living room. He holds <Subject 2> (the running shoes) in his right hand near his waist. He looks directly at the camera with a confident smile. The white crew-neck T-shirt and dark shorts are clearly visible. Warm natural light from the left casts a gentle shadow on the right side of his face. Modern living room background, slightly out of focus. The single pair of grey-blue running shoes is visible, held naturally.
+This segment demonstrates: {seg_theme}.
 
-Between 00:00.500 and 00:02.500, <Subject 1> gently lifts the shoes to chest level, displaying them to the camera. His right hand rotates the shoes slowly to show the side profile, revealing the white EVA midsole and the mesh texture of the upper. His expression is calm and confident. The shoes stay in the same position relative to the camera frame.
+The video must follow this EXACT 6-cell action sequence from <Picture 1> (each cell corresponds to one continuous 1.3-second interval, totaling 8 seconds):
 
-[Shot 2] At 00:02.500, the camera cuts to a close-up on <Subject 1>'s hands placing the shoes on a clean surface. His right hand brings the shoes down gently onto the floor. His left hand stays near the shoes, fingers extended, not touching yet. The shoes are now visible in full, showing both the side profile and the laces. Soft natural light highlights the mesh texture.
+{cells_block}
 
-Between 00:03.500 and 00:05.000, <Subject 1>'s right hand rotates the shoes 180 degrees to show the back heel and the outsole. His left hand gestures to the outsole, highlighting the black rubber pattern. The shoes stay centered in the frame.
+CRITICAL: Each AddGuide keyframe (frame_idx=24/72/120/144/168) is a STRONG visual constraint. The video MUST visually match cell 2-5 at those exact moments.
 
-[Shot 3] At 00:05.000, the camera angle shifts to show <Subject 1> kneeling down to put on the shoes. His right foot slides into the right shoe, then his left foot into the left shoe. His hands pull the heel tab up to secure the fit. His expression is focused, looking down at his feet.
+STRICT cell-by-cell timing (DO NOT skip any step):
+- Seconds 0.0-1.3 (Cell 1 SETUP): exactly per Cell 1 action
+- Seconds 1.3-2.7 (Cell 2 TRIGGER): exactly per Cell 2 action
+- Seconds 2.7-4.0 (Cell 3 BUILDUP): exactly per Cell 3 action
+- Seconds 4.0-5.3 (Cell 4 CLIMAX): exactly per Cell 4 action
+- Seconds 5.3-6.7 (Cell 5 DECAY): exactly per Cell 5 action
+- Seconds 6.7-8.0 (Cell 6 RESULT): exactly per Cell 6 action
 
-Between 00:05.500 and 00:07.000, <Subject 1> stands up and starts walking in place, demonstrating the shoes on his feet. The camera follows his lower body, showing the shoes from the front as he walks. His steps are light and natural, showcasing the cushioning of the EVA midsole.
+Do NOT skip cells 2-3 to jump to cell 4. Do NOT have the product start working without the model's prior action. Do NOT add objects from nowhere — every object must come from <Subject 1>'s hands. The AddGuide anchors are STRONGER than the prompt description — if there is a conflict, follow the anchor image.
 
-[Shot 4] At 00:07.000, a side-angle view shows <Subject 1> walking across the living room, the shoes clearly visible on his feet. His arms swing naturally at his sides. The grey-blue mesh upper and white midsole are visible from the side. The camera tracks his movement smoothly.
+[Shot 1 — SETUP] At 00:00.000, the segment opens with <Subject 1> in a clean indoor setting matching <Picture 1>. The product ({name}) must appear in frame within the first 3 seconds. <Subject 1> performs the action from Cell 1.
 
-Between 00:07.500 and 00:08.000, <Subject 1> stops walking and stands facing the camera with a confident smile, his feet shoulder-width apart, the shoes fully visible. His hands return to his sides. The composition mirrors <Picture 1> in framing, posture, and hand position.
+[Shot 2 — TRIGGER] At 00:01.333, <Subject 1> performs the action from Cell 2. Hand details are precise: thumb + index finger grip, or palm support. The product is held steadily, no shaking.
 
-No additional people, no other products, no mirrors, no reflections, no cups, no bottles, no bags, no accessories appear in the scene at any point. The single pair of grey-blue running shoes stays consistent throughout. The white T-shirt and dark shorts stay the same color throughout. <Subject 1>'s face, body, and outfit stay consistent throughout.
+[Shot 3 — BUILDUP] At 00:03.000, <Subject 1> performs the action from Cell 3. The product's key feature begins to show its function. Hand movements are smooth and purposeful.
+
+[Shot 4 — CLIMAX] At 00:05.000, <Subject 1> performs the action from Cell 4. The product's {sp_list[0] if sp_list else 'core selling point'} is fully visible and clearly demonstrated. This is the most visually dramatic moment.
+
+[Shot 5 — DECAY] At 00:06.333, <Subject 1> performs the action from Cell 5. The product's transformation or benefit is now visible.
+
+[Shot 6 — RESULT, mirror of Shot 1] At 00:07.000, <Subject 1> performs the action from Cell 6. Camera framing, posture, and product position mirror the opening frame, creating a satisfying visual loop.
+
+Hard constraints enforced: 1 single take (no cuts), 8 seconds exact (no time jumps), no "随后/接着/然后" transitions, hands always precise (指节 detail), only ONE product in frame (never two, never a reflection), product visible in first 3 seconds, no plastic-looking skin, no airbrushed effect, skin texture has natural pores.
+
+No additional people, no other products, no mirrors, no reflections, no extraneous accessories appear in the scene at any point. The {name} stays consistent throughout. <Subject 1>'s face, body, and outfit stay consistent throughout.
 
 overall_soundscape:
-Quiet indoor room ambience, soft natural light hum.
+{soundscape_block}
 
 non_diegetic_music:
 N/A"""
@@ -62,8 +233,13 @@ N/A"""
 
 def build_segment_workflow_6cell(segment_idx: int, product_id: str = "shoes",
                                     product_name: str = "running_shoes",
-                                    product_info: Optional[dict] = None,
-                                    cell_paths: Optional[list] = None):
+                                    product_info: Optional[dict] = None,  # type: ignore
+                                    cell_paths: Optional[list] = None,
+                                    segment_desc: str = "",
+                                    cell_actions: list = None,
+                                    voiceover_text: str = "",
+                                    model_gender: str = "neutral",
+                                    voiceover_full: dict = None):
     """构建单段 H3 workflow (6 cell 宫格图 + 5 AddGuide)
 
     关键改进:
@@ -78,11 +254,35 @@ def build_segment_workflow_6cell(segment_idx: int, product_id: str = "shoes",
 
     # P2: 优先用传入的 cell_paths, 否则 fallback 到旧硬编码
     if cell_paths and len(cell_paths) == 6:
-        cell_filenames = [os.path.basename(p) for p in cell_paths]
+        # ComfyUI LoadImage 期望: input/ 子目录里的 basename
+        # 我们的 cell 在 projects/<name>/output/cells/, ComfyUI 找不到
+        # **强制 copy 到 input/ + 用项目名前缀**避免冲突
+        import shutil as _shutil_copy
+        import re as _re_copy
+        prefix = _re_copy.sub(r'[^a-zA-Z0-9_-]', '_', product_id)
+        cell_filenames = []
+        for i, src_path in enumerate(cell_paths, 1):
+            base = os.path.basename(src_path)
+            new_name = f"{prefix}_{base}"
+            dst = os.path.join("/root/autodl-tmp/h3p/input", new_name)
+            try:
+                # 仅当文件不存在或不同才 copy (避免重复 IO)
+                if not os.path.exists(dst) or os.path.getmtime(src_path) > os.path.getmtime(dst):
+                    _shutil_copy.copy2(src_path, dst)
+            except Exception as e:
+                print(f"[warn] copy cell {src_path} → {dst} 失败: {e}")
+            cell_filenames.append(new_name)
     else:
         # 向后兼容 (旧硬编码)
         cell_filenames = [f"{seg_name}_cell{i}.png" for i in range(1, 7)]
-    prompt = build_segment_prompt(segment_idx, product_info or {})
+    # 段描述 (从 storyboard 取)
+    seg_desc = ""
+    try:
+        # 尝试从 segment_dict 取 (如果调用者传了)
+        seg_desc = (segment_idx and locals().get('segment_dict', {}).get('description', '')) or ""
+    except Exception:
+        pass
+    prompt = build_segment_prompt(segment_idx, product_info or {}, seg_desc, cell_actions, voiceover_text, model_gender, voiceover_full)
 
     # 段间 seed 变化, 让 5 段视频不重复
     seed = 42000 + segment_idx * 100

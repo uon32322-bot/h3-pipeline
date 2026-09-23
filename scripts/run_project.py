@@ -85,6 +85,21 @@ def cmd_llm(args):
     copy = llm_modules.build_copy_v2(info, text)
     print(f"  → {copy.get('_model', '?')}: {copy.get('tagline', '')[:80]}")
 
+    # 2026-09-23 新增: 独立生成主播腔口播稿 (跟脚本分离, 借鉴 Streamer-Sales + yao + H3 官方)
+    print("[2.5/3] 独立口播稿生成 (主播腔, 跟脚本分离)...", flush=True)
+    try:
+        vo_result = llm_modules.build_voiceover_segments(info, copy)
+        copy["voiceover_segments"] = [
+            seg.get("text", "") for seg in vo_result.get("voiceover_segments", [])
+        ]
+        copy["voiceover_segments_full"] = vo_result.get("voiceover_segments", [])
+        print(f"  → {vo_result.get('_model', '?')}: 6 cell 主播腔")
+        # 显示每个 cell 内容
+        for seg in vo_result.get("voiceover_segments", []):
+            print(f"    cell {seg.get('cell_id', '?')} [{seg.get('emotion', '')}]: {seg.get('text', '')}")
+    except Exception as e:
+        print(f"  → 失败: {e}, 用脚本衍生 voiceover_segments")
+
     print("[3/3] 分镜 (5 段 × 1 镜 v3)...", flush=True)
     beats = llm_modules.build_storyboard_v3(info, copy)
     print(f"  → {beats[0].get('_model', '?')}: 共 {len(beats)} 段")
@@ -130,6 +145,11 @@ def cmd_grids(args):
             product_form=info.get("product_form", ""),
             max_retries=3,
         )
+        # 2026-09-23 修复: 检查 verdict.final_ok, 不通过则跳过 (避免假成功)
+        if not verdict.get("final_ok"):
+            print(f"  ❌ 段{seg_num} 失败 (3 次重生成后仍不通过): {out_path}", flush=True)
+            print(f"     history: {verdict.get('history', [])[-1]}", flush=True)
+            continue  # 跳过 register_grid, 不写 manifest
         proj.register_grid(seg_num, out_path)
         print(f"  ✓ 段{seg_num} OK: {out_path}")
 
@@ -181,19 +201,59 @@ def cmd_workflows(args):
     manifest = proj.load_manifest()
     cells = manifest.get("cells", {})
 
+    info = proj.get_info()
+    copy = proj.get_copy()
+    storyboard = proj.get_storyboard()  # [{description, keyframe, lastframe, segment, cell_actions}, ...]
+    seg_desc_map = {b.get("segment"): b.get("description", "") for b in storyboard}
+    seg_cell_actions_map = {
+        b.get("segment"): b.get("cell_actions") for b in storyboard
+    }
+    # 2026-09-23 新增: 模特性别 (用于 H3 原生 TTS 决定男声/女声)
+    model_gender = info.get("model_gender", "neutral")
+
+    # 2026-09-23 新增: 5 段配音 (优先用 voiceover_segments, 借鉴 yao 5 层口播结构)
+    voiceover_segments = copy.get("voiceover_segments", [])
+    if isinstance(voiceover_segments, list) and len(voiceover_segments) == 5:
+        # LLM 显式生成的 5 段配音 (推荐)
+        voiceovers = {i + 1: voiceover_segments[i] for i in range(5)}
+        print(f"  ✓ 使用 voiceover_segments (5 段独立配音)")
+    else:
+        # fallback: 从 tagline/SP/CTA 拼 (老逻辑)
+        voiceovers = {
+            1: copy.get("tagline", "")[:30],
+            2: copy.get("selling_points", [""])[0][:30] if len(copy.get("selling_points", [])) > 0 else "",
+            3: copy.get("selling_points", ["", ""])[1][:30] if len(copy.get("selling_points", [])) > 1 else "",
+            4: copy.get("selling_points", ["", "", ""])[2][:30] if len(copy.get("selling_points", [])) > 2 else "",
+            5: copy.get("cta", "")[:30],
+        }
+        print(f"  ! fallback: 用 tagline/SP/CTA 拼 5 段配音")
+
     for seg_idx in range(1, 6):
         cell_paths = cells.get(f"seg{seg_idx}", [])
         if len(cell_paths) != 6:
             print(f"  段 {seg_idx}: cell 不全 ({len(cell_paths)}/6), 跳过")
             continue
-        # 调用 build_segment_workflow 时, 传入项目专属 cell 路径
+        seg_desc = seg_desc_map.get(seg_idx, "")
+        seg_cell_actions = seg_cell_actions_map.get(seg_idx)  # 2026-09-23 新增: 6 cell 显式动作
+        seg_voiceover = voiceovers.get(seg_idx, "")  # 2026-09-23 新增: H3 原生配音
+        # 2026-09-23 新增: 主播腔 emotion + audio_directive (从 voiceover_segments_full 拿)
+        seg_voiceover_full = None
+        vo_full_list = copy.get("voiceover_segments_full", [])
+        if isinstance(vo_full_list, list) and len(vo_full_list) >= seg_idx:
+            seg_voiceover_full = vo_full_list[seg_idx - 1]
+        # 调用 build_segment_workflow 时, 传入项目专属 cell 路径 + product_info + segment_desc + cell_actions + voiceover + gender + voiceover_full
         nodes = bsw.build_segment_workflow_6cell(
-            seg_idx, product_id=args.project, cell_paths=cell_paths
+            seg_idx, product_id=args.project, cell_paths=cell_paths,
+            product_info=info, segment_desc=seg_desc,
+            cell_actions=seg_cell_actions,  # 2026-09-23 新增
+            voiceover_text=seg_voiceover,  # 2026-09-23 新增: H3 原生 TTS
+            model_gender=model_gender,  # 2026-09-23 新增: 男声/女声
+            voiceover_full=seg_voiceover_full,  # 2026-09-23 新增: 主播腔 emotion
         )
         wf_path = proj.workflow_path(seg_idx)
         json.dump(nodes, open(wf_path, "w"), indent=2)
         proj.register_workflow(seg_idx, wf_path)
-        print(f"  段 {seg_idx}: {len(nodes)} 节点 → {wf_path}")
+        print(f"  段 {seg_idx}: {len(nodes)} 节点 → {wf_path} (cell_actions={len(seg_cell_actions) if seg_cell_actions else 0}, VO={len(seg_voiceover)}字, gender={model_gender}, emotion={seg_voiceover_full.get('emotion', '') if seg_voiceover_full else 'none'})")
 
 
 def cmd_render(args):
