@@ -81,6 +81,18 @@ def cmd_llm(args):
     info = llm_modules.recognize_product(image, text)
     print(f"  → {info.get('_model', '?')}: {info.get('category', '')}")
 
+    # 2026-09-23 新增: 检测模特图性别, 注入到 info (男模→male, 女模→female)
+    try:
+        if os.path.exists(person):
+            gender = llm_modules.detect_model_gender(person)
+            info["model_gender"] = gender
+            print(f"  ✓ 模特性别检测: {gender}")
+        else:
+            info["model_gender"] = "neutral"
+    except Exception as e:
+        print(f"  ! 模特性别检测失败: {e}, 用 neutral")
+        info["model_gender"] = "neutral"
+
     print("[2/3] 文案生成...", flush=True)
     copy = llm_modules.build_copy_v2(info, text)
     print(f"  → {copy.get('_model', '?')}: {copy.get('tagline', '')[:80]}")
