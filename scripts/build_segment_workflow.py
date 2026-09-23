@@ -314,7 +314,9 @@ def build_segment_workflow_6cell(segment_idx: int, product_id: str = "shoes",
         "11": {"class_type": "BasicGuider", "inputs": {"model": ["5", 0], "conditioning": ["7", 0]}},
         "12": {"class_type": "KSamplerSelect", "inputs": {"sampler_name": "res_multistep"}},
         "13": {"class_type": "BasicScheduler", "inputs": {"scheduler": "simple", "steps": 8, "denoise": 1.0, "model": ["5", 0]}},
-        # 5 AddGuide 中间锚 (核心改进)
+        # 5 AddGuide 中间锚 (官方 H3 设计) — 所有 AddGuide 都基于 first_frame latent (2026-09-23 验证)
+        # 之前错误: 链式传递 latent `["21", 1]` — MiniMaxH3AddGuide 只有 1 个 output (positive), index 1 不存在
+        # 官方设计: AddGuide 修改 latent in-place, 输出 positive 给下一个 AddGuide, latent 都从 first_frame 引
         "21": {"class_type": "MiniMaxH3AddGuide", "inputs": {
             "positive": ["7", 0], "latent": ["7", 1], "image": ["20", 0],
             "vae": ["3", 0], "frame_idx": 24}},
