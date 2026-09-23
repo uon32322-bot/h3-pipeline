@@ -276,7 +276,7 @@ def build_copy_v2(product_info: dict, product_text: str = "") -> dict:
 4. ≤25字/段, 口语化, 像说话不像写作
 5. 形态贯穿: 卖点里描述使用动作时, 必须符合产品形态 (例: 软管 = 挤压; 瓶 = 按压)
 
-**voiceover_segments (新增, 2026-09-23, 借鉴 yao 5 层口播结构 + ClipForge [pause] 标记)**:
+**voiceover_segments (新增, 借鉴 yao 5 层口播结构 + ClipForge [pause] 标记)**:
 
 为 5 段视频**分别**生成**带分层停顿**的台词, 每段独立一句, 总字数严格控制:
 
@@ -300,8 +300,50 @@ def build_copy_v2(product_info: dict, product_text: str = "") -> dict:
 3. 加语气词 ("呀/啊/呢/啦" 等) 让语调有起伏
 4. 数字用阿拉伯 (39块, 不是三十九元)
 5. 用"!" 加强重音, 关键卖点加【】标记
-6. 短句为主, 不写超过 8 字的连续长句"""
-    user_p = f"产品:{product_info.get('name','?')}, 类别:{product_info.get('category','')}, 形态:{product_info.get('shape', product_info.get('product_form',''))}, 卖点:{sp_str}, 用户文字:{product_text[:400] if product_text else ''}\n\n请生成严格 5 段式 JSON, 文案中必须体现产品物理形态, voiceover_segments 必须 5 个字符串"
+6. 短句为主, 不写超过 8 字的连续长句
+
+**📌 关键: 真人口语化风格 (2026-09-23 新增, 用户反馈"主播腔词藻堆砌, 不像真人说话")**
+
+❌ 主播腔模板 (听起来假):
+- "哎呀家人们!今天给大家安利一支神仙洁面!" ← 模板词堆砌
+- "闭眼入!冲就完了!29块9!" ← 形容词堆
+- "你好我好大家好!" ← 空洞招呼
+
+✅ 真人说话 (听起来像人):
+- "姐妹们,你们有没有这种感觉?早上洗完脸吧,过一会儿就紧绷得难受"
+- "你看这个白色小管子,挤出来的泡沫跟奶油一样绵"
+- "我现在自己也在用,用了二十多天,脸摸起来软软的"
+- "我妈以前用皂基洗面奶烂过脸,后来换成这个才好"
+
+**真人感 6 大规则**:
+1. **场景代入**: "你们有没有遇到过这种问题..." 优于 "今天给大家推荐..."
+2. **亲身体验**: "我自己也在用" / "我妈以前..." / "闺蜜说..." 优于 "根据产品介绍..."
+3. **口语词**: 用的/这/那/啥/呗/吧/喽/诶, 不用 "此时此刻/综上所述/因此"
+4. **重复强调**: "而且而且" / "真的真的" / "重点重点", 重复是真人特点
+5. **具体细节**: "挤出来的泡沫跟奶油一样" 优于 "泡沫非常绵密"
+6. **自然停顿**: 用"、"。"分割短句, 不是一气呵成
+
+**禁词表** (生成的文案中, 这些词出现 1 次以上就必须改):
+- "闭眼入/冲就完了/绝绝子/炸裂/家人们/宝宝们/老铁们/安利/种草"
+  (这些是模板词,真人很少用,主播才说)
+- "此时此刻/由此可见/综上所述/值得注意的是" (书面语, 真人不说)
+- "震撼/惊艳/引爆/YYDS/绝绝子" (网络流行语堆砌)
+- "非常/特别/极其" (程度副词, 真人用具体词代替)
+
+**真人感文案示例** (few-shot, 让 LLM 学风格):
+
+【示例 1: 洁面乳 (替换前 → 替换后)】
+❌ 替换前: "哎呀家人们!今天给大家安利一支神仙洁面!洗完脸紧绷拔干?别再硬扛!闭眼入!"
+✅ 替换后: "姐妹们,你们有没有这种感觉?早上洗完脸吧,过一会儿就紧绷得难受。我之前一直用皂基洗面奶,后来脸都洗得发红了,才换的氨基酸的。你看这个白色软管,挤出来的泡沫跟奶油一样绵,洗完脸摸起来不紧绷。我现在自己也在用,用了二十多天,脸上摸着软软的,一点儿也不假滑。"
+
+【示例 2: 榨汁机 (替换前 → 替换后)】
+❌ 替换前: "哎呀家人们!还在搬整台破壁机?细高圆柱杯旋盖即榨!USB-C充电15杯!冲就完了!"
+✅ 替换后: "姐妹们,我以前在家用那种大破壁机,占地方不说,声音还特别大,早上用一次全家都被吵醒。后来我换了这种小圆柱杯,你看就这么一拧,水果扔进去,30秒果汁就打出来了,而且USB-C充电,我试了一下充一次能榨15杯,够用一整天。"
+
+**怎么用 few-shot**:
+在 user_p 里 **把示例全文贴进去**, 让 LLM 学真人说话的句式、停顿、用词. 然后让它基于产品信息生成对应版本.
+    """
+    user_p = f"""产品:{product_info.get('name','?')}, 类别:{product_info.get('category','')}, 形态:{product_info.get('shape', product_info.get('product_form',''))}, 卖点:{sp_str}, 用户文字:{product_text[:400] if product_text else ''}\n\n请生成严格 5 段式 JSON, 文案中必须体现产品物理形态, voiceover_segments 必须 5 个字符串"""
     last_err = None
     for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
         try:
@@ -341,10 +383,10 @@ def _fallback_copy(info: dict) -> dict:
 
 # ============ 任务 3: 分镜脚本 (LLM) ============
 def build_storyboard_v2(product_info: dict, copy: dict) -> list:
-    """10 镜分镜 (5 段 × 2 镜, 每段 4s, 总时长 20s)
+    """10 镜分镜 (5 段 * 2 镜, 每段 4s, 总时长 20s)
 
     输入: product_info, copy
-    输出: [{beat_id, time_range:[s,e], keyframe|scene, description|visual, segment:N}, ...] x 10
+    输出: [{beat_id, time_range:[s,e], keyframe|scene, description|visual, segment:N}, ...] 乘 10
 
     段分配 (40s 完整视频拆 5 段, 每段 8s, 每段含 2 镜):
     段 1 (0-8s):   镜 1-2 = 钩子 + 痛点
@@ -365,7 +407,7 @@ def build_storyboard_v2(product_info: dict, copy: dict) -> list:
     sp = (copy.get("selling_points", ["卖点"]) if isinstance(copy, dict) else ["卖点"])[:3]
     sys_p = """40s 完整带货视频分镜师。回复必须是严格 JSON 数组, 不要 markdown 包装.
 
-**核心架构: 40s 完整视频 = 5 段 × 8s = 10 镜 (每段 2 镜, 每镜 4s)**
+**核心架构: 40s 完整视频 = 5 段 x 8s = 10 镜 (每段 2 镜, 每镜 4s)**
 - 段 1 (0-8s):   镜 1-2 = 钩子(0-4s) + 痛点(4-8s)
 - 段 2 (8-16s):  镜 3-4 = 产品亮相(8-12s) + 卖点1演示(12-16s)
 - 段 3 (16-24s): 镜 5-6 = 卖点2演示(16-20s) + 卖点3演示(20-24s)
@@ -516,10 +558,10 @@ scene: {copy.get('scene', '') if isinstance(copy, dict) else ''}
 
 
 def _fallback_storyboard(info: dict) -> list:
-    """规则版 10 镜 (5 段 × 2 镜, 每镜 4s, 总 40s)"""
+    """规则版 10 镜 (5 段 * 2 镜, 每镜 4s, 总 40s)"""
     cat = info.get("category", "其他")
     name = info.get("name", "产品")
-    # 5 段 × 2 镜 = 10 镜
+    # 5 段 * 2 镜 = 10 镜
     segment_actions = {
         "洁面": [
             ("双手手背轻触脸颊,展示T区油光", "右手握洁面乳管身,左手推开翻盖"),
@@ -640,10 +682,10 @@ def _fallback_storyboard(info: dict) -> list:
 # ============ 任务 4: 宫格图 prompt 构建 (v6) ============
 
 
-# ============ 任务 3b: 5 段 × 1 镜 v3 (一段一卖点) ============
+# ============ 任务 3b: 5 段 x 1 镜 v3 (一段一卖点) ============
 
 def build_storyboard_v3(product_info: dict, copy: dict) -> list:
-    """5 段 × 1 镜 (每段 8s, 每段只表达 1 个核心主题)
+    """5 段 x 1 镜 (每段 8s, 每段只表达 1 个核心主题)
 
     段 1: 钩子+痛点 (8s)
     段 2: SP1 (8s)
@@ -660,14 +702,34 @@ def build_storyboard_v3(product_info: dict, copy: dict) -> list:
     tagline = copy.get("tagline", "") if isinstance(copy, dict) else ""
     sp = (copy.get("selling_points", ["卖点"]) if isinstance(copy, dict) else ["卖点"])[:3]
 
-    sys_p = """你是带货视频分镜师。只输出严格 JSON 数组, 正好 5 个对象, 不要 markdown 包装。
+    # 2026-09-23 修复: 强制注入模特图性别 (避免 LLM 写错"Female presenter" 实际是男模)
+    model_gender = product_info.get("model_gender", "neutral")  # female / male / neutral
+    if model_gender == "male":
+        gender_desc_en = "An Asian male (25-35 yo, short black hair, clean-shaven or light stubble, casual shirt)"
+        gender_desc_cn = "男模特 (亚洲男性, 25-35岁, 短发, 干净或轻微胡渣, 休闲衬衫)"
+    elif model_gender == "female":
+        gender_desc_en = "An Asian female (25-35 yo, shoulder-length hair, natural makeup, casual top)"
+        gender_desc_cn = "女模特 (亚洲女性, 25-35岁, 肩长发, 淡妆, 休闲上衣)"
+    else:
+        gender_desc_en = "An Asian person (25-35 yo, gender-neutral styling)"
+        gender_desc_cn = "亚洲模特 (25-35岁, 性别中性风格)"
 
-    |**架构**: 5 段 × 1 镜 (每镜 8s, 总 40s), 段内 6 cell 由程序自动展开
+    sys_p = f"""你是带货视频分镜师。只输出严格 JSON 数组, 正好 5 个对象, 不要 markdown 包装。
+
+    |**架构**: 5 段 x 1 镜 (每镜 8s, 总 40s), 段内 6 cell 由程序自动展开
     - 段 1 (0-8s): 钩子+痛点 (1 个分镜对象)
     - 段 2 (8-16s): SP1 演示 (1 个分镜对象, 6 cell 围绕 SP1 展开)
     - 段 3 (16-24s): SP2 演示 (1 个分镜对象, 6 cell 围绕 SP2 展开)
     - 段 4 (24-32s): SP3 演示 (1 个分镜对象, 6 cell 围绕 SP3 展开)
     - 段 5 (32-40s): 三色 + CTA (1 个分镜对象, 6 cell 围绕色彩+行动展开)
+
+    |**模特硬约束** (CRITICAL, 2026-09-23 修复):
+    - **必须使用 {gender_desc_en}** 作为视频中的唯一主角
+    - **绝对禁止** 写 "Female presenter" / "Asian female" / "she" — 模特是 **{gender_desc_cn}**
+    - **绝对禁止** 出现性别不匹配的代词 (她/他), 必须用 "the model" / "they"
+    - 所有 cell_actions 中提到主角时, 用 "{gender_desc_en}" 这个完整描述
+    - 如果 model_gender == "male", 所有代词必须用 "he/his/him"
+    - 如果 model_gender == "female", 所有代词必须用 "she/her/her"
 
     |**字段** (每段必须包含, 不能缺):
     - segment: 1-5
@@ -680,7 +742,7 @@ def build_storyboard_v3(product_info: dict, copy: dict) -> list:
       "Subject动作 + 接触的产品部位 + 视觉反馈结果"
 
       **每个 cell_actions 必须形成**完整动作链**, 6 个步骤不能跳过任何中间环节:
-      - cell_actions[0] (SETUP, 0-1.3s): 模特 + 产品 + 场景的开场姿势, 产品必须已入画
+      - cell_actions[0] (SETUP, 0-1.3s): {gender_desc_en} + 产品 + 场景的开场姿势, 产品必须已入画
       - cell_actions[1] (TRIGGER, 1.3-2.7s): 第 1 个可见动作, 手指/手开始接触产品的具体部位 (例: thumb+index fingers pinch lid edge)
       - cell_actions[2] (BUILDUP, 2.7-4.0s): 动作深入, 产品开始显示**视觉变化** (例: juice swirling, foam rising, fruit dropping in)
       - cell_actions[3] (CLIMAX, 4.0-5.3s): 卖点最强烈呈现, 产品**最终状态**完全展现 (例: full juice, sealed cap, locked clip)
@@ -692,14 +754,15 @@ def build_storyboard_v3(product_info: dict, copy: dict) -> list:
       - ❌ 产品在 cell 2 突然工作 (cell 1 还没操作)
       - ❌ 凭空出现物品 (水果必须从手里/碗里出来)
       - ❌ 抽象描述如 "the action happens" (必须具体到手指 + 接触点)
+      - ❌ 性别写错 (必须与 model_gender 一致)
 
-      **典型好例子 (口红)**:
-      1. "An Asian female with monolid eyes holds the lipstick tube upright in her right hand, cap closed, presenting the product to camera"
-      2. "Her thumb and index finger pinch the cap and pull it straight up, revealing the pink bullet tip"
-      3. "She rotates the base slowly, the lipstick bullet extends halfway out of the tube"
-      4. "She glides the pink bullet across her lower lip in one smooth left-to-right motion"
-      5. "She presses her lips together gently, distributing the color, hands resting at her sides"
-      6. "She turns her face left and right to show the finished lip color, mirroring the opening pose"
+      **典型好例子 (男模, 电饭锅)**:
+      1. "{gender_desc_en} stands behind a kitchen counter holding one box-shaped white rice cooker in front view"
+      2. "His right index finger presses firmly onto the chrome top-mounted lid release latch"
+      3. "The damped lid unlocks with an audible click and smoothly glides upward, releasing a gentle billow of steam"
+      4. "The top lid reaches full vertical extension, revealing golden jasmine rice filled to the brim"
+      5. "He pulls both hands back gracefully to chest level, directing focus to the fresh steaming rice texture"
+      6. "He smiles warmly into the camera lens beside the open steaming cooker, mirroring the opening pose"
 
     每段 description 必须是 1 个完整连贯场景描述 (不是 6 个动作列表)。
 
@@ -931,6 +994,399 @@ cta: {copy.get('cta', '')}
     return _fallback_voiceover_segments(product_info, copy, persona)
 
 
+def build_voiceover_synced(product_info: dict, copy: dict, storyboard: list, persona: str = "乐乐喵_萝莉") -> dict:
+    """同步版配音生成 — 配音内容**严格跟随画面 cell_actions** (2026-09-23 修复)
+
+    关键问题: 之前 build_voiceover_segments 只参考脚本 (tagline/SP/CTA),
+    生成的主播腔是抽象的"人说话", 不一定跟画面 cell 1-6 动作一致.
+    用户反馈: "配音内容太简单, 和画面内容无法同步" (配音说"煮粥"时, 画面已经切到"开盖展示")
+
+    修复: 把 5 段分镜的 cell_actions (画面 6 步动作链) 喂给 LLM,
+    让 LLM **为每个 cell 生成匹配的配音**, 严格在 1.3s 时间点描述对应动作.
+
+    输入:
+        product_info: 产品识别结果
+        copy: 书面脚本
+        storyboard: 5 段分镜, 每段含 cell_actions (6 步) + description + keyframe
+        persona: 主播人设
+
+    输出:
+        {
+            "voiceover_segments_full": [
+                {cell_id, segment, timing_start, timing_end, text, emotion, pacing, volume, audio_directive, visual_sync_note},
+                ... 共 30 个 (5 段 × 6 cell)
+            ]
+        }
+    """
+    info_s = "\n".join([f"{k}:{v}" for k, v in product_info.items()
+                        if v and not str(k).startswith("_") and not isinstance(v, list)])
+
+    # 整理 5 段 × 6 cell = 30 个 cell_actions 输入 LLM
+    cell_actions_all = []
+    for seg in storyboard[:5]:
+        seg_id = seg.get("segment", "?")
+        desc = seg.get("description", "")
+        cell_actions = seg.get("cell_actions", [])
+        if not isinstance(cell_actions, list) or len(cell_actions) != 6:
+            cell_actions = ["动作 1", "动作 2", "动作 3", "动作 4", "动作 5", "动作 6"]
+        for i, ca in enumerate(cell_actions, 1):
+            t_start = (i - 1) * 1.3
+            t_end = min(i * 1.3, 8.0)
+            cell_actions_all.append({
+                "segment": seg_id,
+                "cell_id": (seg_id - 1) * 6 + i,  # 1-30 全局
+                "local_cell": i,  # 段内 1-6
+                "timing_start": t_start,
+                "timing_end": t_end,
+                "segment_desc": desc[:80],
+                "cell_action": str(ca)[:200],
+            })
+
+    # 写成紧凑文本
+    cells_text = ""
+    for c in cell_actions_all:
+        cells_text += f"[段{c['segment']} cell{c['local_cell']} {c['timing_start']:.1f}-{c['timing_end']:.1f}s] {c['cell_action']}\n"
+
+    sys_p = f"""# Role: 抖音金牌带货主播「{persona}」
+
+## 关键任务: 配音内容严格跟随画面动作 (2026-09-23 用户要求)
+
+你将看到 30 个 cell, 每个 cell 对应视频中 1.3 秒的画面动作.
+**每个 cell 必须生成 1 句配音, 配音内容描述**该 cell 画面正在发生的事**.
+
+### 强约束
+1. **每 cell 1 句, 8-15 字** (1.3 秒念完)
+2. **内容必须描述画面动作** (不是抽象概念, 不是参数/形态/价格)
+3. **画外音风格** — 不需要跟人物口型对齐, 描述画面即可
+4. **不要杜撰数字** — 数字必须是动作/视觉可见的 (例: 倒计时 18s, 24 小时)
+5. **总配音: 5 段 × 6 cell = 30 cell**, 每段配音连续念完 6 cell 后, 段末留静音
+
+### 错误示例 (❌)
+- cell 1 显示"按预约键调 30 分钟", 配音说"哎呀家人们看过来" (跟画面无关)
+- cell 5 显示"开盖展示米饭", 配音说"24 小时预约" (跟画面无关)
+
+### 正确示例 (✅)
+- cell 1 显示"按预约键调 30 分钟", 配音说"按预约键调到 30 分钟"
+- cell 5 显示"开盖展示米饭", 配音说"你看这米粒粒分明"
+- cell 6 显示"模特满意微笑", 配音说"口感跟现煮一样"
+
+## Output Format (严格 JSON)
+{{
+  "voiceover_segments_full": [
+    {{
+      "cell_id": 1,
+      "segment": 1,
+      "local_cell": 1,
+      "timing_start": 0.0,
+      "timing_end": 1.3,
+      "text": "按预约键调 30 分钟",
+      "emotion": "demonstrate",
+      "pacing": "medium",
+      "volume": "medium",
+      "audio_directive": "(操作演示, 平静, 跟随画面动作)",
+      "visual_sync_note": "模特按触屏预约键"
+    }},
+    ... 共 30 个
+  ]
+}}
+
+## 初始化
+直接输出 JSON. 严格按 30 个 cell 输出. 禁止解释, 禁止开场白."""
+
+    user_p = f"""# 商品信息
+{info_s}
+
+# 书面脚本 (供背景, 不要照抄)
+tagline: {copy.get('tagline', '')}
+selling_points: {copy.get('selling_points', [])}
+cta: {copy.get('cta', '')}
+
+# 30 cell 画面动作 (1.3s/个, 严格 1:1 配音)
+{cells_text}
+
+# 你的任务
+为 30 个 cell 各自生成 1 句画外音, 严格描述画面动作.
+- 数字必须是画面可见的 (触屏显示, 倒计时, 数字图标)
+- 8-15 字/句
+- emotion 从 [excited / persuasive / pain_point / demonstrate / trust / urgent] 选
+- 直接输出 JSON."""
+
+    last_err = None
+    for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
+        try:
+            raw = call_lk888(
+                m,
+                [{"role": "system", "content": sys_p},
+                 {"role": "user", "content": user_p}],
+                temperature=0.7, max_tokens=8000, timeout=300,  # 30 cell × 100 token = 3000
+            )
+            result = parse_json_strict(raw)
+            if not isinstance(result, dict):
+                last_err = f"{m}: returned non-dict"
+                continue
+            segs = result.get("voiceover_segments_full", [])
+            if not isinstance(segs, list):
+                last_err = f"{m}: voiceover_segments_full not list"
+                continue
+            if len(segs) != 30:
+                last_err = f"{m}: returned {len(segs)} segments, expected 30"
+                continue
+            # 容错补全
+            for i, seg in enumerate(segs, 1):
+                if not isinstance(seg, dict):
+                    seg = {"text": f"cell {i} 配音"}
+                    segs[i-1] = seg
+                if "text" not in seg or not seg.get("text"):
+                    seg["text"] = cell_actions_all[i-1]["cell_action"][:15]
+                if "cell_id" not in seg:
+                    seg["cell_id"] = i
+                if "segment" not in seg:
+                    seg["segment"] = cell_actions_all[i-1]["segment"]
+                if "local_cell" not in seg:
+                    seg["local_cell"] = cell_actions_all[i-1]["local_cell"]
+                if "timing_start" not in seg:
+                    seg["timing_start"] = cell_actions_all[i-1]["timing_start"]
+                if "timing_end" not in seg:
+                    seg["timing_end"] = cell_actions_all[i-1]["timing_end"]
+                if "emotion" not in seg:
+                    seg["emotion"] = "demonstrate"
+                if "audio_directive" not in seg:
+                    seg["audio_directive"] = "(画外音, 跟随画面)"
+                if "visual_sync_note" not in seg:
+                    seg["visual_sync_note"] = cell_actions_all[i-1]["cell_action"][:80]
+            result["_model"] = m
+            result["_persona"] = persona
+            return result
+        except Exception as e:
+            last_err = f"{m}: {e}"
+            continue
+
+    print(f"  [build_voiceover_synced] 失败: {last_err}, fallback")
+    # Fallback: 把 cell_action 前 15 字直接当配音
+    segs = []
+    for c in cell_actions_all:
+        segs.append({
+            "cell_id": c["cell_id"],
+            "segment": c["segment"],
+            "local_cell": c["local_cell"],
+            "timing_start": c["timing_start"],
+            "timing_end": c["timing_end"],
+            "text": c["cell_action"][:12],
+            "emotion": "demonstrate",
+            "pacing": "medium",
+            "volume": "medium",
+            "audio_directive": "(画外音, 跟随画面)",
+            "visual_sync_note": c["cell_action"][:80],
+        })
+    return {"voiceover_segments_full": segs, "_model": "fallback", "_persona": persona}
+
+
+def _fallback_voiceover_segments(info: dict, copy: dict, persona: str = "乐乐喵_萝莉") -> dict:
+    """规则版 voiceover_segments (兜底)"""
+    name = info.get("name", "产品")
+    tagline = copy.get("tagline", "")
+    sp = copy.get("selling_points", [])
+    if isinstance(sp, str):
+        sp = [s.strip() for s in sp.split("|") if s.strip()][:3]
+    sp = sp[:3] if len(sp) >= 3 else sp + ["保证"] * (3 - len(sp))
+    cta = copy.get("cta", "点击下方小黄车直接下单")
+
+
+def build_voiceover_structured(product_info: dict, copy: dict, storyboard: list = None, persona: str = "乐乐喵_萝莉") -> dict:
+    """5 段式带货口播稿 — 严格钩子 + 3 卖点 + 催单结构 (2026-09-23 用户要求)
+
+    用户反馈: 之前的配音"没有按照带货视频的结构生成, 开头基本没感觉到钩子"
+    之前的 build_voiceover_segments 生成 6 cell 跟画面同步, 但缺乏"5 段式带货结构".
+
+    修复: 强制 5 段, 每段有明确的角色:
+      段 1 (0-8s)   = 钩子 (痛点/反问) + 介绍产品
+      段 2 (8-16s)  = 卖点 1 (产品形态 + 数字) + 演示场景
+      段 3 (16-24s) = 卖点 2 (使用场景代入) + 情绪
+      段 4 (24-32s) = 卖点 3 (一锅多用 / 多功能) + 信任
+      段 5 (32-40s) = 信任收尾 (大容量 + 内胆) + 价格催单
+
+    输入: product_info, copy (含 selling_points 3 条), storyboard (可选, 用于更精准匹配画面)
+    输出: {"voiceover_segments": [
+        {seg, text, emotion, rate, vol, purpose},  # 共 5 段
+    ]}
+
+    调用: gem-3.7-flash (PRIMARY) -> tt-5.6-luna (SECONDARY)
+    """
+    info_s = "\n".join([f"{k}:{v}" for k, v in product_info.items()
+                        if v and not str(k).startswith("_") and not isinstance(v, list)])
+
+    sp = copy.get("selling_points", [])
+    if isinstance(sp, str):
+        sp = [s.strip() for s in sp.split("|") if s.strip()][:3]
+    sp = sp[:3] if len(sp) >= 3 else sp + ["实用"] * (3 - len(sp))
+    cta = copy.get("cta", "点击下方小黄车直接下单")
+    tagline = copy.get("tagline", "")
+
+    # 5 段画面内容提示 (从 storyboard 拿)
+    segment_desc = ""
+    if storyboard and isinstance(storyboard, list):
+        for s in storyboard[:5]:
+            seg_id = s.get("segment", "?")
+            desc = s.get("description", "")
+            cell_actions = s.get("cell_actions", [])
+            ca_short = " | ".join([str(c)[:40] for c in cell_actions[:3]]) if isinstance(cell_actions, list) else ""
+            segment_desc += f"\n段 {seg_id} 画面: {desc[:80]} (动作: {ca_short})"
+
+    sys_p = f"""# Role: 抖音金牌带货主播「{persona}」
+
+## 任务: 生成 5 段式带货口播稿 (5 句, 段间画外音)
+
+视频是 5 段拼接 (每段 8 秒, 总 40 秒), 你必须为每段生成 1 句配音, 段间 0.3-0.5 秒自然停顿.
+**严格 5 段式结构, 不能省任何段**:
+
+### 段 1 (0-8秒) 钩子 + 痛点 + 介绍产品 (40-50 字)
+- **必须有"姐妹们/家人们/宝宝们"称呼开头**
+- **用提问/反问/震惊开场** (例: "还在为...烦恼吗?")
+- **快速切痛点** (1 句)
+- **亮产品** + 1 个**承诺** (例: "这问题, 一台炊匠 IH 电饭煲就能解决")
+- 节奏: **急促 + 热情** (rate +15%)
+
+### 段 2 (8-16秒) 卖点 1 + 演示场景 (40-50 字)
+- 突出**第 1 个卖点** (从 selling_points 选)
+- **加画面可见的数字** (1300W / 30 分钟 / 0:30 倒计时)
+- **演示场景代入** (例: "你看, 按预约键 30 分钟, 选蛋糕功能")
+- 节奏: 平稳专业 (rate +5%)
+
+### 段 3 (16-24秒) 卖点 2 + 场景故事 (30-40 字)
+- 突出**第 2 个卖点** (从 selling_points 选)
+- **场景代入 + 情绪** (例: "睡前预约煮粥, 早上掀盖就有热乎粥")
+- 节奏: 稍慢 + 信任 (rate +5%)
+
+### 段 4 (24-32秒) 卖点 3 + 一锅多用 (30-40 字)
+- 突出**第 3 个卖点** (从 selling_points 选)
+- **一锅多用 / 满足全家口味**
+- 节奏: 稳定 (rate +3%)
+
+### 段 5 (32-40秒) 信任收尾 + 价格催单 (35-45 字)
+- **大容量 + 内胆好洗 + 信任**
+- **必须有价格/优惠/催单** (例: "今天立减 100, 戳小黄车下单")
+- 节奏: 急促 + 催单 (rate +18%)
+
+## 禁词 (出现 1 次以上必须改)
+- "哎呀家人们/闭眼入/冲就完了/绝绝子/YYDS" (模板词)
+- 任何杜撰数字 (产品信息没有的数字)
+- "此时此刻/由此可见" (书面语)
+
+## Output Format (严格 JSON)
+{{
+  "voiceover_segments": [
+    {{
+      "seg": 1,
+      "text": "姐妹们!还在为煮饭夹生烦恼吗?这台炊匠 IH 电饭煲, 一键预约 24 小时, 早上就有香喷喷的米饭!",
+      "emotion": "excited",
+      "purpose": "钩子+痛点+产品"
+    }},
+    {{
+      "seg": 2,
+      "text": "1300W IH 立体加热, 你看按预约键 30 分钟, 选蛋糕功能, 倒计时启动, 早餐自动好!",
+      "emotion": "demonstrate",
+      "purpose": "卖点 1: IH + 24h 预约演示"
+    }},
+    {{
+      "seg": 3,
+      "text": "睡前预约煮粥 6 小时, 早上掀盖就有热乎粥, 不用早起看锅!",
+      "emotion": "trust",
+      "purpose": "卖点 2: 煮粥场景代入"
+    }},
+    {{
+      "seg": 4,
+      "text": "12 大菜单, 柴火饭糙米饭煲仔饭蒸蛋糕, 一锅搞定全家口味!",
+      "emotion": "persuasive",
+      "purpose": "卖点 3: 多功能"
+    }},
+    {{
+      "seg": 5,
+      "text": "4 升大容量够 6 口人, 食品级内胆好洗耐用!今天立减 100 戳小黄车下单!",
+      "emotion": "urgent",
+      "purpose": "信任+催单"
+    }}
+  ]
+}}
+
+## 初始化
+直接输出 JSON. 严格 5 段结构, 每段 1 句, 禁词表不可违反, 数字必须来自产品信息."""
+    user_p = f"""# 商品信息 (来自产品图 + 文字, 真实可靠)
+{info_s}
+
+# 3 个核心卖点 (从产品信息提炼)
+SP1: {sp[0] if len(sp) > 0 else ''}
+SP2: {sp[1] if len(sp) > 1 else ''}
+SP3: {sp[2] if len(sp) > 2 else ''}
+
+# CTA + tagline
+tagline: {tagline}
+cta: {cta}
+
+# 5 段画面内容 (从分镜)
+{segment_desc}
+
+# 你的任务
+基于商品信息和 5 段画面, 生成 5 段式带货口播稿.
+- 段 1 必须有"姐妹们/家人们/宝宝们"开头, 钩子提问 + 切痛点 + 亮产品
+- 段 2-4 每段对应 1 个 SP, 加画面可见数字
+- 段 5 信任收尾 + 价格催单
+- 数字必须真实 (从产品信息), 不能编造
+- 直接输出 JSON, 5 段必须全, 禁词不出现"""
+
+    last_err = None
+    for m in [PRIMARY_MODEL, SECONDARY_MODEL]:
+        try:
+            raw = call_lk888(
+                m,
+                [{"role": "system", "content": sys_p},
+                 {"role": "user", "content": user_p}],
+                temperature=0.8, max_tokens=2000, timeout=180,
+            )
+            result = parse_json_strict(raw)
+            if not isinstance(result, dict):
+                last_err = f"{m}: returned non-dict"
+                continue
+            if isinstance(result, list):
+                result = {"voiceover_segments": result}
+            segs = result.get("voiceover_segments", [])
+            if not isinstance(segs, list):
+                last_err = f"{m}: voiceover_segments not list"
+                continue
+            if len(segs) != 5:
+                last_err = f"{m}: returned {len(segs)} segments, expected 5"
+                continue
+            # 容错补全
+            for i, seg in enumerate(segs, 1):
+                if not isinstance(seg, dict):
+                    seg = {"text": f"段 {i} 配音", "seg": i}
+                    segs[i-1] = seg
+                if "text" not in seg or not seg.get("text"):
+                    seg["text"] = f"段 {i} 配音"
+                if "seg" not in seg:
+                    seg["seg"] = i
+                if "emotion" not in seg:
+                    seg["emotion"] = "demonstrate"
+                if "purpose" not in seg:
+                    seg["purpose"] = f"段 {i}"
+            result["_model"] = m
+            result["_persona"] = persona
+            return result
+        except Exception as e:
+            last_err = f"{m}: {e}"
+            continue
+
+    print(f"  [build_voiceover_structured] 失败: {last_err}, fallback")
+    # Fallback: 用 selling_points 拼 5 段模板
+    segs = [
+        {"seg": 1, "text": f"姐妹们!还在为煮饭烦恼吗?这台{name}, 24 小时预约, 一键搞定全家早餐!", "emotion": "excited", "purpose": "钩子"},
+        {"seg": 2, "text": f"{sp[0]}, 你看按一下, 自动启动, 早餐自动好!", "emotion": "demonstrate", "purpose": f"卖点1: {sp[0]}"},
+        {"seg": 3, "text": f"{sp[1]}, 睡前预约, 早上掀盖就有!", "emotion": "trust", "purpose": f"卖点2: {sp[1]}"},
+        {"seg": 4, "text": f"{sp[2]}, 一锅搞定全家口味!", "emotion": "persuasive", "purpose": f"卖点3: {sp[2]}"},
+        {"seg": 5, "text": "大容量够全家用, 内胆好洗耐用!今天立减, 戳小黄车下单!", "emotion": "urgent", "purpose": "信任+催单"},
+    ]
+    return {"voiceover_segments": segs, "_model": "fallback", "_persona": persona}
+
+
 def _fallback_voiceover_segments(info: dict, copy: dict, persona: str = "乐乐喵_萝莉") -> dict:
     """规则版 voiceover_segments (兜底)"""
     name = info.get("name", "产品")
@@ -989,7 +1445,7 @@ def _fallback_voiceover_segments(info: dict, copy: dict, persona: str = "乐乐�
 
 
 def _fallback_storyboard_v3(info: dict) -> list:
-    """规则版 5 段 × 1 镜 (每段 8s, 一段一卖点)"""
+    """规则版 5 段 x 1 镜 (每段 8s, 一段一卖点)"""
     cat = info.get("category", "其他")
     name = info.get("name", "产品")
     sp = info.get("selling_points", ["卖点1", "卖点2", "卖点3"])
@@ -1049,7 +1505,7 @@ def generate_grid_image(prompt: str, output_path: str, model: str = "tt-image-2"
     """调灵炫生图 (同步模式, 直接返回 b64)"""
     req = urllib.request.Request(
         LK888_BASE + "/images/generations",
-        data=json.dumps({"model": model, "prompt": prompt, "size": "720x1280", "n": 1}).encode(),
+        data=json.dumps({"model": model, "prompt": prompt, "size": "720*1280", "n": 1}).encode(),
         headers={"Authorization": f"Bearer {_load_key()}",
                  "Content-Type": "application/json"},
         method="POST",

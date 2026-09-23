@@ -128,11 +128,24 @@ def judge_and_retry(image_path: str, regenerate_fn, product_name: str,
     # 第 1 次评审前先生成图 (如果不存在)
     if not _os_judge.path.exists(image_path):
         print(f"  [判官] 第 1 次先生成图...", flush=True)
-        regenerate_fn()
-        time.sleep(2)  # 等文件写入
+        try:
+            regenerate_fn()
+            time.sleep(2)  # 等文件写入
+        except Exception as e:
+            print(f"  [判官] 生成失败: {e}, 重试...", flush=True)
+            history.append({"ok": False, "score": 0, "issues": [f"generate failed: {e}"], "attempt": 0})
+        # 2026-09-23 修复: 如果生成后文件仍不存在, 跳过 judge 不崩溃
+        if not _os_judge.path.exists(image_path):
+            print(f"  [判官] 生成后文件仍不存在: {image_path}", flush=True)
+            return {"final_ok": False, "history": history or [{"ok": False, "score": 0, "issues": ["file not created"], "attempt": 0}], "error": "regenerate_fn did not produce file"}
     for attempt in range(1, max_retries + 1):
         print(f"  [判官] 第 {attempt}/{max_retries} 次评审...", flush=True)
-        verdict = judge_grid(image_path, product_name, product_form)
+        # 2026-09-23 修复: judge_grid 也加 try/except, 防止崩溃
+        try:
+            verdict = judge_grid(image_path, product_name, product_form)
+        except Exception as e:
+            print(f"  [判官] 评审异常: {e}", flush=True)
+            verdict = {"ok": False, "score": 0, "issues": [f"judge exception: {e}"]}
         verdict["attempt"] = attempt
         history.append(verdict)
         print(f"    score={verdict.get('score', 0)}, ok={verdict.get('ok')}, issues={verdict.get('issues', [])}", flush=True)
@@ -143,6 +156,16 @@ def judge_and_retry(image_path: str, regenerate_fn, product_name: str,
 
         if attempt < max_retries:
             print(f"  ✗ 评审未通过, 触发重生成...", flush=True)
+            # 2026-09-23 修复: 重生成也加 try/except
+            try:
+                regenerate_fn()
+                time.sleep(2)
+            except Exception as e:
+                print(f"  [判官] 重生成失败: {e}", flush=True)
+            # 再次校验文件
+            if not _os_judge.path.exists(image_path):
+                print(f"  [判官] 重生成后文件仍不存在, 跳过", flush=True)
+                continue
             regenerate_fn()
             # 等 1 秒确保文件写入
             time.sleep(1)

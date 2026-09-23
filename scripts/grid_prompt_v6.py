@@ -27,12 +27,12 @@ Each cell is a FULL independent photograph (NOT a sub-grid, NOT a mini-panel).
 Each cell occupies 1/6 of the entire image, no overlaps, no nesting.
 Vertical 9:16 aspect ratio for the entire image."""
 
-ACTION_BLOCK_TEMPLATE = """Panel 1 (sec0): {act1}
-Panel 2 (sec1): {act2}
-Panel 3 (sec2): {act3}
-Panel 4 (sec3): {act4}
-Panel 5 (sec4): {act5}
-Panel 6 (sec5): {act6}"""
+ACTION_BLOCK_TEMPLATE = """Panel 1 (sec0-1.3s, SETUP): {act1}
+Panel 2 (sec1.3-2.7s, TRIGGER): {act2}
+Panel 3 (sec2.7-4.0s, BUILDUP): {act3}
+Panel 4 (sec4.0-5.3s, CLIMAX): {act4}
+Panel 5 (sec5.3-6.7s, DECAY): {act5}
+Panel 6 (sec6.7-8.0s, RESULT, mirror of Panel 1): {act6}"""
 
 
 def build_grid_prompt(info: dict, beats: list, product_text: str = None,

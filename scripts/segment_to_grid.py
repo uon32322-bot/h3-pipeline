@@ -47,9 +47,36 @@ def build_segment_grid_prompt(segment: dict, info: dict, copy: dict,
 
     修复: 段内 6 cell, 每 cell 对应 1 个分镜动作
     cell_count=6 替代 2 (避免拉伸)
+
+    2026-09-23 修复: 用 cell_actions (6 元素) 生成灵炫 prompt, 让灵炫按
+    显式动作序列生成 6 cell 宫格图, 解决"动作凭空出现"和"动作不连贯"
     """
-    beats = segment["beats"]
-    return build_grid_prompt(info, beats, product_text, cell_count=6)
+    # 优先用 cell_actions (来自 LLM 的 6 元素显式动作数组)
+    # 没有则从 segment.beats[0] 取, fallback 用 description
+    cell_actions = None
+    if isinstance(segment.get("beats"), list) and len(segment["beats"]) >= 1:
+        beat = segment["beats"][0]
+        if isinstance(beat.get("cell_actions"), list) and len(beat["cell_actions"]) == 6:
+            cell_actions = beat["cell_actions"]
+    if not cell_actions:
+        # fallback: 把 description/keyframe/lastframe 拆 6 段
+        desc = segment.get("description", "")
+        kf = segment.get("keyframe", "")
+        lf = segment.get("lastframe", "")
+        cell_actions = [
+            kf or f"setup: {desc}",
+            f"trigger: begin demonstration of {desc}",
+            f"buildup: action deepens ({desc})",
+            f"climax: selling point at peak ({desc})",
+            f"decay: benefit visible ({desc})",
+            lf or f"result: closing pose mirroring opening",
+        ]
+    # 把 cell_actions 转成 beats 格式 (每 beat 用 cell_action 作 description)
+    beats_for_grid = [
+        {"id": i+1, "description": cell_actions[i], "time_range": [0, 8]}
+        for i in range(6)
+    ]
+    return build_grid_prompt(info, beats_for_grid, product_text, cell_count=6)
 
 
 def _b64(p):
@@ -65,6 +92,9 @@ def generate_grid_i2i(prompt: str, person_image_path: str,
     - image: 模特参考图 (锁定人物脸/身形/风格)
     - prompt: 文字描述 (动作 + 产品形态)
     - model: tt-image-2
+
+    2026-09-23 修复: 失败时 raise RuntimeError 而不是返回 _error dict,
+    让 grid_judge.judge_and_retry 能捕获并重试
     """
     boundary = "----formboundary789"
     person_b64 = _b64(person_image_path)
@@ -79,7 +109,7 @@ def generate_grid_i2i(prompt: str, person_image_path: str,
         f'Content-Disposition: form-data; name="size"{CRLF}{CRLF}720x1280{CRLF}'
         f"--{boundary}{CRLF}"
         f'Content-Disposition: form-data; name="image"; filename="person.png"{CRLF}'
-        f'Content-Type: image/png{CRLF}{CRLF}'
+        f"Content-Type: image/png{CRLF}{CRLF}"
     ).encode() + base64.b64decode(person_b64) + (
         f"{CRLF}--{boundary}--{CRLF}"
     ).encode()
@@ -95,14 +125,23 @@ def generate_grid_i2i(prompt: str, person_image_path: str,
     )
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
-            resp = json.loads(r.read().decode())
-        b64_data = resp["data"][0]["b64_json"]
+            resp_text = r.read().decode()
+            resp = json.loads(resp_text)
+        # 2026-09-23 修复: 检查 resp 结构
+        if "data" not in resp or not resp.get("data"):
+            raise RuntimeError(f"灵炫 i2i 响应无 data: {str(resp)[:200]}")
+        b64_data = resp["data"][0].get("b64_json")
+        if not b64_data:
+            raise RuntimeError(f"灵炫 i2i 响应无 b64_json: {str(resp)[:200]}")
         img_bytes = base64.b64decode(b64_data)
+        if len(img_bytes) < 1000:
+            raise RuntimeError(f"灵炫 i2i 返回图片太小 ({len(img_bytes)} bytes)")
         with open(output_path, "wb") as f:
             f.write(img_bytes)
         return {"_ok": True, "size_kb": len(img_bytes) // 1024, "path": output_path}
     except Exception as e:
-        return {"_error": str(e)}
+        # 2026-09-23 修复: raise RuntimeError, 让 grid_judge 重试
+        raise RuntimeError(f"灵炫 i2i 失败: {e}")
 
 
 # === 5 段端到端 ===
@@ -197,6 +236,10 @@ def slice_5_to_5(beats: list) -> list:
             "beat_id": i+1, "segment": i+1,
             "time_range": [float(i*8), float((i+1)*8)],
             "description": f"段{i+1} 默认内容", "keyframe": "", "lastframe": "",
+            "cell_actions": [
+                f"setup: 段{i+1} 开场", f"trigger: 演示开始", f"buildup: 动作深入",
+                f"climax: 卖点呈现", f"decay: 收尾", f"result: 收尾确认"
+            ],
             "_model": "fallback",
         } for i in range(5)]
     segments = []
@@ -207,6 +250,8 @@ def slice_5_to_5(beats: list) -> list:
             "beats": [b],
             "keyframe": b.get("keyframe", ""),
             "lastframe": b.get("lastframe", ""),
+            "cell_actions": b.get("cell_actions"),  # 2026-09-23 新增: 透传 6 cell 显式动作
+            "description": b.get("description", ""),  # 透传 description
         })
     return segments
 
@@ -226,6 +271,20 @@ def render_5_segments_v3(image_path: str, product_text: str, output_dir: str,
     print(f"[1/3] 产品识别...", flush=True)
     info = recognize_product(image_path, product_text)
     print(f"  → {info.get('_model')}: {info.get('category')}, 形态: {info.get('shape','')[:60]}", flush=True)
+
+    # 2026-09-23 新增: 检测模特性别 (用于 H3 原生 TTS 决定男声/女声, 修复"男模特+女声")
+    print(f"[1.5/3] 模特性别检测 (防男模特+女声)...", flush=True)
+    if reference_person_path and os.path.exists(reference_person_path):
+        try:
+            from llm_modules import detect_model_gender
+            gender = detect_model_gender(reference_person_path)
+            info["model_gender"] = gender
+            print(f"  → 模特性别: {gender}", flush=True)
+        except Exception as e:
+            info["model_gender"] = "neutral"
+            print(f"  → 性别检测失败: {e}, fallback 'neutral'", flush=True)
+    else:
+        info["model_gender"] = "neutral"
 
     print(f"[2/3] 文案生成...", flush=True)
     copy = build_copy_v2(info, product_text)
